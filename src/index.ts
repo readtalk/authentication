@@ -47,15 +47,39 @@ app.get('/users/:username', async (c) => {
 	const updates = await c.env.DATA_DB.prepare(
 		`
 		SELECT 
-			u.*,
+			u.id,
+			u.user_id,
+			u.content,
+			u.image_url,
+			u.created_at,
+			'original' as type,
+			NULL as reposter_id,
 			(SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
 			(SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
 			(SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count
 		FROM updatelist u 
-		WHERE u.user_id = ? 
-		ORDER BY u.created_at DESC
+		WHERE u.user_id = ?
+
+		UNION ALL
+
+		SELECT 
+			u.id,
+			u.user_id,
+			u.content,
+			u.image_url,
+			ur.created_at as created_at,
+			'repost' as type,
+			ur.user_id as reposter_id,
+			(SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
+			(SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
+			(SELECT COUNT(*) FROM updatelist_repost ur2 WHERE ur2.updatelist_id = u.id) as repost_count
+		FROM updatelist_repost ur
+		INNER JOIN updatelist u ON ur.updatelist_id = u.id
+		WHERE ur.user_id = ?
+
+		ORDER BY created_at DESC
 		`
-	).bind(user.id).all();
+	).bind(user.id, user.id).all();
 
 	return c.json({ 
 		success: true, 
