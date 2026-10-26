@@ -54,10 +54,14 @@ app.get('/users/:username', async (c) => {
 			u.created_at,
 			'original' as type,
 			NULL as reposter_id,
+			u_user.username as author_username,
+			u_user.yourname as author_yourname,
+			u_user.avatar as author_avatar,
 			(SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
 			(SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
 			(SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count
 		FROM updatelist u 
+		LEFT JOIN user u_user ON u.user_id = u_user.id
 		WHERE u.user_id = ?
 
 		UNION ALL
@@ -70,11 +74,15 @@ app.get('/users/:username', async (c) => {
 			ur.created_at as created_at,
 			'repost' as type,
 			ur.user_id as reposter_id,
+			u_user.username as author_username,
+			u_user.yourname as author_yourname,
+			u_user.avatar as author_avatar,
 			(SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
 			(SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
 			(SELECT COUNT(*) FROM updatelist_repost ur2 WHERE ur2.updatelist_id = u.id) as repost_count
 		FROM updatelist_repost ur
 		INNER JOIN updatelist u ON ur.updatelist_id = u.id
+		LEFT JOIN user u_user ON u.user_id = u_user.id
 		WHERE ur.user_id = ?
 
 		ORDER BY created_at DESC
