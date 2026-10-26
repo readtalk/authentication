@@ -14,11 +14,6 @@
 			"binding": "DATA_DB",
 			"database_name": "SERVER_D1",
 			"database_id": "9c6d47de-7136-494a-96aa-3e16648a4880"
-		},
-		{
-			"binding": "DATA_BASE",
-			"database_name": "database",
-			"database_id": "0f6bd2e8-257e-4611-9158-974e28a9c647"
 		}
 	],
 	"exports": {
