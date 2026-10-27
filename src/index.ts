@@ -359,9 +359,9 @@ export default {
 				primary: "#000000",
 				favicon: "https://raw.githubusercontent.com/readtalk/asean/refs/heads/main/public/favicon.ico",
 				logo: {
-					dark: "https://raw.githubusercontent.com/readtalk/asean/refs/heads/main/public/brand.png",
+					dark: "https://raw.githubusercontent.com/readtalk/global/refs/heads/main/public/logo-dark.png",
 					light:
-						"https://raw.githubusercontent.com/readtalk/asean/refs/heads/main/public/brand.png",
+						"https://raw.githubusercontent.com/readtalk/global/refs/heads/main/public/logo-dark.png",
 				},
 			},
 			success: async (ctx, value) => {
