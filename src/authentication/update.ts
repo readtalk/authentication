@@ -251,8 +251,8 @@ export class UpdateListHandler {
             try {
                 const repostId = crypto.randomUUID();
                 await this.env.DATA_DB.prepare(`
-                    INSERT INTO updatelist_repost (id, updatelist_id, user_id, content)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO updatelist_repost (id, updatelist_id, user_id, content, created_at)
+                    VALUES (?, ?, ?, ?, unixepoch())
                 `).bind(repostId, updateId, userId, content || null).run();
 
                 return c.json({ success: true, action: 'reposted' });
