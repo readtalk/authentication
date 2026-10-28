@@ -37,6 +37,7 @@ app.get('/users', async (c) => {
 
 app.get('/users/:username', async (c) => {
 	const username = c.req.param('username');
+	const viewerId = c.req.header('X-User-Id') || '';
 	
 	const user = await c.env.DATA_DB.prepare(
 		`SELECT * FROM user WHERE username = ?`
@@ -59,7 +60,9 @@ app.get('/users/:username', async (c) => {
 			u_user.avatar as author_avatar,
 			(SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
 			(SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
-			(SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count
+			(SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count,
+			EXISTS(SELECT 1 FROM updatelist_like ul WHERE ul.updatelist_id = u.id AND ul.user_id = ?) as is_liked,
+			EXISTS(SELECT 1 FROM updatelist_repost ur WHERE ur.updatelist_id = u.id AND ur.user_id = ?) as is_reposted
 		FROM updatelist u 
 		LEFT JOIN user u_user ON u.user_id = u_user.id
 		WHERE u.user_id = ?
@@ -79,7 +82,9 @@ app.get('/users/:username', async (c) => {
 			u_user.avatar as author_avatar,
 			(SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
 			(SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
-			(SELECT COUNT(*) FROM updatelist_repost ur2 WHERE ur2.updatelist_id = u.id) as repost_count
+			(SELECT COUNT(*) FROM updatelist_repost ur2 WHERE ur2.updatelist_id = u.id) as repost_count,
+			EXISTS(SELECT 1 FROM updatelist_like ul WHERE ul.updatelist_id = u.id AND ul.user_id = ?) as is_liked,
+			EXISTS(SELECT 1 FROM updatelist_repost ur2 WHERE ur2.updatelist_id = u.id AND ur2.user_id = ?) as is_reposted
 		FROM updatelist_repost ur
 		INNER JOIN updatelist u ON ur.updatelist_id = u.id
 		LEFT JOIN user u_user ON u.user_id = u_user.id
@@ -87,7 +92,7 @@ app.get('/users/:username', async (c) => {
 
 		ORDER BY created_at DESC
 		`
-	).bind(user.id, user.id).all();
+	).bind(viewerId, viewerId, user.id, viewerId, viewerId, user.id).all();
 
 	return c.json({ 
 		success: true, 
