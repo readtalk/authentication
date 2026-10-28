@@ -57,6 +57,27 @@ app.get('/users/:username', async (c) => {
 
 	if (!user) return c.json({ success: false, error: "User not found" }, 404);
 
+	let followStatus = "none";
+	let isFollowing = false;
+	let isFollower = false;
+
+	if (viewerId && viewerId !== user.id) {
+		const followA = await c.env.DATA_DB.prepare(
+			`SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?`
+		).bind(viewerId, user.id).first();
+		
+		const followB = await c.env.DATA_DB.prepare(
+			`SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?`
+		).bind(user.id, viewerId).first();
+
+		isFollowing = !!followA;
+		isFollower = !!followB;
+
+		if (isFollowing && isFollower) followStatus = "mutual";
+		else if (isFollowing) followStatus = "following";
+		else if (isFollower) followStatus = "followers";
+	}
+
 	const updates = await c.env.DATA_DB.prepare(
 		`
 		SELECT 
@@ -110,9 +131,62 @@ app.get('/users/:username', async (c) => {
 		success: true, 
 		user: {
 			...user,
+			follow_status: followStatus,
+			follower_count: 0,
+			following_count: 0,
 			updates: updates.results
 		} 
 	});
+});
+
+app.post('/users/:username/follow', async (c) => {
+	const username = c.req.param('username');
+	const authHeader = c.req.header('Authorization');
+	
+	if (!authHeader || !authHeader.startsWith('Bearer ')) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+
+	try {
+		const token = authHeader.replace('Bearer ', '');
+		const payloadBase64 = token.split(".")[1];
+		const payload = JSON.parse(atob(payloadBase64));
+		const viewerId = payload.properties?.id || payload.sub;
+
+		if (!viewerId) return c.json({ success: false, error: "Invalid token" }, 401);
+
+		const targetUser = await c.env.DATA_DB.prepare(
+			`SELECT id FROM user WHERE username = ?`
+		).bind(username).first();
+
+		if (!targetUser) return c.json({ success: false, error: "User not found" }, 404);
+		if (targetUser.id === viewerId) return c.json({ success: false, error: "Cannot follow yourself" }, 400);
+
+		const existing = await c.env.DATA_DB.prepare(
+			`SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?`
+		).bind(viewerId, targetUser.id).first();
+
+		if (existing) {
+			await c.env.DATA_DB.prepare(
+				`DELETE FROM follows WHERE follower_id = ? AND following_id = ?`
+			).bind(viewerId, targetUser.id).run();
+			return c.json({ success: true, action: "unfollowed" });
+		} else {
+			await c.env.DATA_DB.prepare(
+				`INSERT INTO follows (follower_id, following_id) VALUES (?, ?)`
+			).bind(viewerId, targetUser.id).run();
+
+			const notifId = crypto.randomUUID();
+			await c.env.DATA_DB.prepare(
+				`INSERT INTO notifications (id, user_id, actor_id, type) VALUES (?, ?, ?, 'follow')`
+			).bind(notifId, targetUser.id, viewerId).run();
+
+			return c.json({ success: true, action: "followed" });
+		}
+	} catch (error) {
+		console.error("Follow error:", error);
+		return c.json({ success: false, error: "Internal server error" }, 500);
+	}
 });
 
 app.get('/users/online', async (c) => {
