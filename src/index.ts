@@ -37,7 +37,19 @@ app.get('/users', async (c) => {
 
 app.get('/users/:username', async (c) => {
 	const username = c.req.param('username');
-	const viewerId = c.req.header('X-User-Id') || '';
+	
+	let viewerId = '';
+	const authHeader = c.req.header('Authorization');
+	if (authHeader && authHeader.startsWith('Bearer ')) {
+		try {
+			const token = authHeader.replace('Bearer ', '');
+			const payloadBase64 = token.split(".")[1];
+			const payload = JSON.parse(atob(payloadBase64));
+			viewerId = payload.properties?.id || payload.sub || '';
+		} catch (e) {
+			// Abaikan jika token tidak valid
+		}
+	}
 	
 	const user = await c.env.DATA_DB.prepare(
 		`SELECT * FROM user WHERE username = ?`
