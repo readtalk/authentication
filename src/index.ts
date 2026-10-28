@@ -46,9 +46,7 @@ app.get('/users/:username', async (c) => {
 			const payloadBase64 = token.split(".")[1];
 			const payload = JSON.parse(atob(payloadBase64));
 			viewerId = payload.properties?.id || payload.sub || '';
-		} catch (e) {
-			// Abaikan jika token tidak valid
-		}
+		} catch (e) {}
 	}
 	
 	const user = await c.env.DATA_DB.prepare(
@@ -186,6 +184,63 @@ app.post('/users/:username/follow', async (c) => {
 	} catch (error) {
 		console.error("Follow error:", error);
 		return c.json({ success: false, error: "Internal server error" }, 500);
+	}
+});
+
+app.get('/notifications', async (c) => {
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+
+	try {
+		const token = authHeader.replace("Bearer ", "");
+		const payloadBase64 = token.split(".")[1];
+		const payload = JSON.parse(atob(payloadBase64));
+		const userId = payload.properties?.id || payload.sub;
+
+		if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
+
+		const notifications = await c.env.DATA_DB.prepare(`
+			SELECT 
+				n.*,
+				u.username as actor_username,
+				u.yourname as actor_yourname,
+				u.avatar as actor_avatar
+			FROM notifications n
+			LEFT JOIN user u ON n.actor_id = u.id
+			WHERE n.user_id = ?
+			ORDER BY n.created_at DESC
+			LIMIT 50
+		`).bind(userId).all();
+
+		return c.json({ success: true, notifications: notifications.results });
+	} catch (error) {
+		return c.json({ success: false, error: "Failed to fetch notifications" }, 500);
+	}
+});
+
+app.put('/notifications/read', async (c) => {
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+
+	try {
+		const token = authHeader.replace("Bearer ", "");
+		const payloadBase64 = token.split(".")[1];
+		const payload = JSON.parse(atob(payloadBase64));
+		const userId = payload.properties?.id || payload.sub;
+
+		if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
+
+		await c.env.DATA_DB.prepare(`
+			UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0
+		`).bind(userId).run();
+
+		return c.json({ success: true });
+	} catch (error) {
+		return c.json({ success: false, error: "Failed to mark notifications as read" }, 500);
 	}
 });
 
@@ -411,7 +466,7 @@ export default {
 			}
 		}
 
-		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats')) {
+		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications')) {
 			return app.fetch(request, env, ctx);
 		}
 
