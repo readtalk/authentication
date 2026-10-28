@@ -202,6 +202,17 @@ export class UpdateListHandler {
                 SELECT * FROM updatelist_comment WHERE id = ?
             `).bind(commentId).all();
 
+            const [post] = await this.env.DATA_DB.prepare(
+                `SELECT user_id FROM updatelist WHERE id = ?`
+            ).bind(updateId).all();
+
+            if (post && post.user_id !== userId) {
+                const notifId = crypto.randomUUID();
+                await this.env.DATA_DB.prepare(
+                    `INSERT INTO notifications (id, user_id, actor_id, type, target_id) VALUES (?, ?, ?, 'comment', ?)`
+                ).bind(notifId, post.user_id, userId, updateId).run();
+            }
+
             return c.json({ success: true, comment: newComment });
         });
 
@@ -267,6 +278,17 @@ export class UpdateListHandler {
                     VALUES (?, ?, ?)
                 `).bind(likeId, updateId, userId).run();
 
+                const [post] = await this.env.DATA_DB.prepare(
+                    `SELECT user_id FROM updatelist WHERE id = ?`
+                ).bind(updateId).all();
+
+                if (post && post.user_id !== userId) {
+                    const notifId = crypto.randomUUID();
+                    await this.env.DATA_DB.prepare(
+                        `INSERT INTO notifications (id, user_id, actor_id, type, target_id) VALUES (?, ?, ?, 'like', ?)`
+                    ).bind(notifId, post.user_id, userId, updateId).run();
+                }
+
                 return c.json({ success: true, action: 'liked' });
             } catch (error: any) {
                 if (error.message?.includes('UNIQUE constraint failed')) {
@@ -295,6 +317,17 @@ export class UpdateListHandler {
                     INSERT INTO updatelist_repost (id, updatelist_id, user_id, content, created_at)
                     VALUES (?, ?, ?, ?, unixepoch())
                 `).bind(repostId, updateId, userId, content || null).run();
+
+                const [post] = await this.env.DATA_DB.prepare(
+                    `SELECT user_id FROM updatelist WHERE id = ?`
+                ).bind(updateId).all();
+
+                if (post && post.user_id !== userId) {
+                    const notifId = crypto.randomUUID();
+                    await this.env.DATA_DB.prepare(
+                        `INSERT INTO notifications (id, user_id, actor_id, type, target_id) VALUES (?, ?, ?, 'repost', ?)`
+                    ).bind(notifId, post.user_id, userId, updateId).run();
+                }
 
                 return c.json({ success: true, action: 'reposted' });
             } catch (error: any) {
