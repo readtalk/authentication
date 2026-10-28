@@ -31,8 +31,12 @@ export class UpdateListHandler {
                     (SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
                     (SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count,
                     EXISTS(SELECT 1 FROM updatelist_like ul WHERE ul.updatelist_id = u.id AND ul.user_id = ?) as is_liked,
-                    EXISTS(SELECT 1 FROM updatelist_repost ur WHERE ur.updatelist_id = u.id AND ur.user_id = ?) as is_reposted
+                    EXISTS(SELECT 1 FROM updatelist_repost ur WHERE ur.updatelist_id = u.id AND ur.user_id = ?) as is_reposted,
+                    u_user.username as author_username,
+                    u_user.yourname as author_yourname,
+                    u_user.avatar as author_avatar
                 FROM updatelist u
+                LEFT JOIN user u_user ON u.user_id = u_user.id
             `;
             let params: any[] = [userId, userId];
 
@@ -57,6 +61,35 @@ export class UpdateListHandler {
                 updates: results,
                 hasMore: results.length === limit
             });
+        });
+
+        this.app.get('/updates/:id', async (c) => {
+            const updateId = c.req.param('id');
+            const userId = c.req.header('X-User-Id') || '';
+
+            const stmt = this.env.DATA_DB.prepare(`
+                SELECT 
+                    u.*,
+                    (SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
+                    (SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
+                    (SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count,
+                    EXISTS(SELECT 1 FROM updatelist_like ul WHERE ul.updatelist_id = u.id AND ul.user_id = ?) as is_liked,
+                    EXISTS(SELECT 1 FROM updatelist_repost ur WHERE ur.updatelist_id = u.id AND ur.user_id = ?) as is_reposted,
+                    u_user.username as author_username,
+                    u_user.yourname as author_yourname,
+                    u_user.avatar as author_avatar
+                FROM updatelist u
+                LEFT JOIN user u_user ON u.user_id = u_user.id
+                WHERE u.id = ?
+            `).bind(userId, userId, updateId);
+
+            const { results } = await stmt.all();
+
+            if (!results || results.length === 0) {
+                return c.json({ success: false, error: 'Post not found' }, 404);
+            }
+
+            return c.json({ success: true, update: results[0] });
         });
 
         this.app.post('/updates', async (c) => {
@@ -132,7 +165,15 @@ export class UpdateListHandler {
         this.app.get('/updates/:id/comments', async (c) => {
             const updateId = c.req.param('id');
             const stmt = this.env.DATA_DB.prepare(`
-                SELECT * FROM updatelist_comment WHERE updatelist_id = ? ORDER BY created_at ASC
+                SELECT 
+                    uc.*,
+                    u.username as author_username,
+                    u.yourname as author_yourname,
+                    u.avatar as author_avatar
+                FROM updatelist_comment uc
+                LEFT JOIN user u ON uc.user_id = u.id
+                WHERE uc.updatelist_id = ? 
+                ORDER BY uc.created_at ASC
             `).bind(updateId);
             const { results } = await stmt.all();
             return c.json({ success: true, comments: results });
