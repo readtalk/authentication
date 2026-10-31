@@ -76,6 +76,14 @@ app.get('/users/:username', async (c) => {
 		else if (isFollower) followStatus = "followers";
 	}
 
+	const followerCountResult = await c.env.DATA_DB.prepare(
+		`SELECT COUNT(*) as count FROM follows WHERE following_id = ?`
+	).bind(user.id).first<{ count: number }>();
+
+	const followingCountResult = await c.env.DATA_DB.prepare(
+		`SELECT COUNT(*) as count FROM follows WHERE follower_id = ?`
+	).bind(user.id).first<{ count: number }>();
+
 	const updates = await c.env.DATA_DB.prepare(
 		`
 		SELECT 
@@ -130,8 +138,8 @@ app.get('/users/:username', async (c) => {
 		user: {
 			...user,
 			follow_status: followStatus,
-			follower_count: 0,
-			following_count: 0,
+			follower_count: followerCountResult?.count || 0,
+			following_count: followingCountResult?.count || 0,
 			updates: updates.results
 		} 
 	});
