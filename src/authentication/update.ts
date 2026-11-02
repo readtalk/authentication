@@ -18,7 +18,47 @@ export class UpdateListHandler {
             allowHeaders: ['Content-Type', 'X-User-Id']
         }));
 
+        this.app.get('/updates/preview', async (c) => {
+            const targetUrl = c.req.query('url');
+            if (!targetUrl) return c.json({ success: false, error: "Missing url parameter" }, 400);
+
+            try {
+                const response = await fetch(targetUrl, {
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (compatible; READTalkBot/1.0; +https://readtalk.workers.dev)",
+                        "Accept": "text/html"
+                    }
+                });
+
+                if (!response.ok) {
+                    return c.json({ success: false, error: "Failed to fetch target URL" }, 400);
+                }
+
+                const html = await response.text();
+                
+                const getMeta = (property: string) => {
+                    const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')) ||
+                                  html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property}["']`, 'i'));
+                    return match ? match[1] : null;
+                };
+
+                const title = getMeta('og:title') || html.match(/<title>([^<]+)<\/title>/i)?.[1] || "No Title";
+                const description = getMeta('og:description') || getMeta('description') || "";
+                const image = getMeta('og:image') || "";
+                const siteName = getMeta('og:site_name') || "";
+
+                return c.json({
+                    success: true,
+                    data: { title, description, image, siteName, url: targetUrl }
+                }, { headers: { "Cache-Control": "public, max-age=3600" } });
+                
+            } catch (error) {
+                return c.json({ success: false, error: "Failed to process preview" }, 500);
+            }
+        });
+
         this.app.get('/updates', async (c) => {
+            // ... (kode /updates yang sebelumnya tetap sama) ...
             const userId = c.req.header('X-User-Id') || '';
             const limit = parseInt(c.req.query('limit') || '20');
             const before = c.req.query('before');
@@ -63,6 +103,10 @@ export class UpdateListHandler {
             });
         });
 
+        // ... (kode /updates/:id, POST /updates, PUT, DELETE, comments, like, repost tetap sama persis) ...
+        // Karena kamu hanya perlu menambahkan blok '/updates/preview' di atas.
+        // Sisa kode di bawah ini saya biarkan utuh.
+        
         this.app.get('/updates/:id', async (c) => {
             const updateId = c.req.param('id');
             const userId = c.req.header('X-User-Id') || '';
