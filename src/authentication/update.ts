@@ -12,37 +12,37 @@ export class UpdateListHandler {
     }
 
     private async getLinkPreview(url: string): Promise<any> {
-        try {
-            // 1. Coba fetch biasa
-            const response = await fetch(url, {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (compatible; READTalkBot/1.0; +https://readtalk.workers.dev)",
-                    "Accept": "text/html"
+        const isVideoSite = url.includes("youtube.com") || url.includes("youtu.be") || url.includes("tiktok.com") || url.includes("instagram.com");
+
+        if (!isVideoSite) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (compatible; READTalkBot/1.0; +https://readtalk.workers.dev)",
+                        "Accept": "text/html"
+                    }
+                });
+
+                if (response.ok) {
+                    const html = await response.text();
+                    const getMeta = (property: string) => {
+                        const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')) ||
+                                      html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property}["']`, 'i'));
+                        return match ? match[1] : null;
+                    };
+
+                    const title = getMeta('og:title') || html.match(/<title>([^<]+)<\/title>/i)?.[1];
+                    const description = getMeta('og:description') || getMeta('description');
+                    const image = getMeta('og:image');
+
+                    if (title && image) {
+                        return { url, title, description, image };
+                    }
                 }
-            });
-
-            if (response.ok) {
-                const html = await response.text();
-                const getMeta = (property: string) => {
-                    const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')) ||
-                                  html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property}["']`, 'i'));
-                    return match ? match[1] : null;
-                };
-
-                const title = getMeta('og:title') || html.match(/<title>([^<]+)<\/title>/i)?.[1];
-                const description = getMeta('og:description') || getMeta('description');
-                const image = getMeta('og:image');
-
-                // Jika berhasil dapat data penting, kembalikan
-                if (title && (image || description)) {
-                    return { url, title, description, image };
-                }
+            } catch (e) {
             }
-        } catch (e) {
-            // Abaikan error fetch biasa, lanjut ke fallback
         }
 
-        // 2. Fallback ke Microlink API jika fetch biasa gagal/kurang lengkap
         try {
             if (this.env.MICROLINK_API) {
                 const microlinkRes = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`, {
@@ -60,7 +60,6 @@ export class UpdateListHandler {
                 }
             }
         } catch (e) {
-            
         }
 
         return null;
@@ -172,7 +171,6 @@ export class UpdateListHandler {
             const updateId = crypto.randomUUID();
             let linkPreviewJson: string | null = null;
 
-            // Deteksi URL di dalam konten
             const urlRegex = /(https?:\/\/[^\s]+)/g;
             const urls = content.match(urlRegex);
 
