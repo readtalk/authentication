@@ -287,9 +287,9 @@ export class UpdateListHandler {
                 SELECT * FROM updatelist_comment WHERE id = ?
             `).bind(commentId).all();
 
-            const [post] = await this.env.DATA_DB.prepare(
+            const post = await this.env.DATA_DB.prepare(
                 `SELECT user_id FROM updatelist WHERE id = ?`
-            ).bind(updateId).all();
+            ).bind(updateId).first();
 
             if (post && post.user_id !== userId) {
                 const notifId = crypto.randomUUID();
@@ -363,9 +363,9 @@ export class UpdateListHandler {
                     VALUES (?, ?, ?)
                 `).bind(likeId, updateId, userId).run();
 
-                const [post] = await this.env.DATA_DB.prepare(
+                const post = await this.env.DATA_DB.prepare(
                     `SELECT user_id FROM updatelist WHERE id = ?`
-                ).bind(updateId).all();
+                ).bind(updateId).first();
 
                 if (post && post.user_id !== userId) {
                     const notifId = crypto.randomUUID();
@@ -403,9 +403,9 @@ export class UpdateListHandler {
                     VALUES (?, ?, ?, ?, unixepoch())
                 `).bind(repostId, updateId, userId, content || null).run();
 
-                const [post] = await this.env.DATA_DB.prepare(
+                const post = await this.env.DATA_DB.prepare(
                     `SELECT user_id FROM updatelist WHERE id = ?`
-                ).bind(updateId).all();
+                ).bind(updateId).first();
 
                 if (post && post.user_id !== userId) {
                     const notifId = crypto.randomUUID();
