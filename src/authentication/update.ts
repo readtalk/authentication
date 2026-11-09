@@ -45,9 +45,17 @@ export class UpdateListHandler {
 
         try {
             if (this.env.MICROLINK_API) {
-                const microlinkRes = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`, {
-                    headers: { "x-api-key": this.env.MICROLINK_API }
+                const params = new URLSearchParams({
+                    url: url,
+                    palette: "true"
                 });
+
+                const microlinkRes = await fetch(`https://pro.microlink.io?${params.toString()}`, {
+                    headers: { 
+                        "x-api-key": this.env.MICROLINK_API 
+                    }
+                });
+                
                 const microlinkData = await microlinkRes.json();
                 
                 if (microlinkData.status === "success" && microlinkData.data) {
@@ -55,7 +63,7 @@ export class UpdateListHandler {
                         url,
                         title: microlinkData.data.title,
                         description: microlinkData.data.description,
-                        image: microlinkData.data.image?.url
+                        image: microlinkData.data.image?.url || microlinkData.data.logo?.url
                     };
                 }
             }
