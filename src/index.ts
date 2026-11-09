@@ -92,6 +92,7 @@ app.get('/users/:username', async (c) => {
 			u.content,
 			u.image_url,
 			u.created_at,
+			u.link_preview,
 			'original' as type,
 			NULL as reposter_id,
 			u_user.username as author_username,
@@ -114,6 +115,7 @@ app.get('/users/:username', async (c) => {
 			u.content,
 			u.image_url,
 			ur.created_at as created_at,
+			u.link_preview,
 			'repost' as type,
 			ur.user_id as reposter_id,
 			u_user.username as author_username,
@@ -133,6 +135,11 @@ app.get('/users/:username', async (c) => {
 		`
 	).bind(viewerId, viewerId, user.id, viewerId, viewerId, user.id).all();
 
+	const formattedUpdates = updates.results.map((row: any) => ({
+		...row,
+		link_preview: row.link_preview ? JSON.parse(row.link_preview) : null
+	}));
+
 	return c.json({ 
 		success: true, 
 		user: {
@@ -140,7 +147,7 @@ app.get('/users/:username', async (c) => {
 			follow_status: followStatus,
 			follower_count: followerCountResult?.count || 0,
 			following_count: followingCountResult?.count || 0,
-			updates: updates.results
+			updates: formattedUpdates
 		} 
 	});
 });
