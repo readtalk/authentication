@@ -218,7 +218,13 @@ app.get('/notifications', async (c) => {
 
 		const notifications = await c.env.DATA_DB.prepare(`
 			SELECT 
-				n.*,
+				n.id,
+				n.user_id,
+				n.actor_id,
+				n.type,
+				n.target_id,
+				n.is_read,
+				n.created_at,
 				u.username as actor_username,
 				u.yourname as actor_yourname,
 				u.avatar as actor_avatar
@@ -226,7 +232,6 @@ app.get('/notifications', async (c) => {
 			LEFT JOIN user u ON n.actor_id = u.id
 			WHERE n.user_id = ?
 			ORDER BY n.created_at DESC
-			LIMIT 50
 		`).bind(userId).all();
 
 		return c.json({ success: true, notifications: notifications.results });
