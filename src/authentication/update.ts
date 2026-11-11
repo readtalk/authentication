@@ -270,7 +270,7 @@ export class UpdateListHandler {
 
             if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
-            const { content } = await c.req.json();
+            const { content, parent_id } = await c.req.json();
 
             if (!content?.trim()) {
                 return c.json({ success: false, error: 'Comment content is required' }, 400);
@@ -279,9 +279,9 @@ export class UpdateListHandler {
             const commentId = crypto.randomUUID();
 
             await this.env.DATA_DB.prepare(`
-                INSERT INTO updatelist_comment (id, updatelist_id, user_id, content)
-                VALUES (?, ?, ?, ?)
-            `).bind(commentId, updateId, userId, content).run();
+                INSERT INTO updatelist_comment (id, updatelist_id, user_id, content, parent_id)
+                VALUES (?, ?, ?, ?, ?)
+            `).bind(commentId, updateId, userId, content, parent_id || null).run();
 
             const [newComment] = await this.env.DATA_DB.prepare(`
                 SELECT * FROM updatelist_comment WHERE id = ?
