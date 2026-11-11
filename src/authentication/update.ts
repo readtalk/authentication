@@ -303,7 +303,7 @@ export class UpdateListHandler {
                     `SELECT user_id FROM updatelist_comment WHERE id = ?`
                 ).bind(parent_id).first();
 
-                if (parentComment && parentComment.user_id !== userId && parentComment.user_id !== post?.user_id) {
+                if (parentComment && parentComment.user_id !== userId) {
                     const replyNotifId = crypto.randomUUID();
                     await this.env.DATA_DB.prepare(
                         `INSERT INTO notifications (id, user_id, actor_id, type, target_id) VALUES (?, ?, ?, 'reply', ?)`
