@@ -298,6 +298,19 @@ export class UpdateListHandler {
                 ).bind(notifId, post.user_id, userId, updateId).run();
             }
 
+            if (parent_id) {
+                const parentComment = await this.env.DATA_DB.prepare(
+                    `SELECT user_id FROM updatelist_comment WHERE id = ?`
+                ).bind(parent_id).first();
+
+                if (parentComment && parentComment.user_id !== userId && parentComment.user_id !== post?.user_id) {
+                    const replyNotifId = crypto.randomUUID();
+                    await this.env.DATA_DB.prepare(
+                        `INSERT INTO notifications (id, user_id, actor_id, type, target_id) VALUES (?, ?, ?, 'reply', ?)`
+                    ).bind(replyNotifId, parentComment.user_id, userId, updateId).run();
+                }
+            }
+
             return c.json({ success: true, comment: newComment });
         });
 
