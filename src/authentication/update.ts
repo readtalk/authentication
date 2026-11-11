@@ -258,7 +258,7 @@ export class UpdateListHandler {
                 FROM updatelist_comment uc
                 LEFT JOIN user u ON uc.user_id = u.id
                 WHERE uc.updatelist_id = ? 
-                ORDER BY uc.created_at ASC
+                ORDER BY uc.created_at DESC
             `).bind(updateId);
             const { results } = await stmt.all();
             return c.json({ success: true, comments: results });
