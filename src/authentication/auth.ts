@@ -86,6 +86,25 @@ export class Authentication extends DurableObject {
             const { name, description, is_private, member_ids } = await c.req.json();
             if (!name?.trim()) return c.json({ success: false, error: 'Chat name is required' }, 400);
 
+            // Pengecekan Duplikasi Chat Privat (1:1)
+            if (is_private && member_ids && member_ids.length === 1) {
+                const targetUserId = member_ids[0];
+                
+                const existingChat = this.sql.exec(`
+                    SELECT ch.id FROM chat ch
+                    INNER JOIN chat_user cu1 ON ch.id = cu1.chat_id
+                    INNER JOIN chat_user cu2 ON ch.id = cu2.chat_id
+                    WHERE ch.is_private = 1 
+                    AND cu1.user_id = ? 
+                    AND cu2.user_id = ?
+                    LIMIT 1
+                `, userId, targetUserId).toArray();
+
+                if (existingChat.length > 0) {
+                    return c.json({ success: true, chat_id: existingChat[0].id, existing: true });
+                }
+            }
+
             const chatId = crypto.randomUUID();
 
             this.sql.exec(
@@ -107,7 +126,7 @@ export class Authentication extends DurableObject {
                 }
             }
 
-            return c.json({ success: true, chat_id: chatId });
+            return c.json({ success: true, chat_id: chatId, existing: false });
         });
     }
 
