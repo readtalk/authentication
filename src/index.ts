@@ -35,6 +35,14 @@ app.get('/users', async (c) => {
 	return c.json({ success: true, users: users.results });
 });
 
+app.get('/users/online', async (c) => {
+	const id = c.env.DATA_DO.idFromName('default');
+	const stub = c.env.DATA_DO.get(id);
+
+	const doUrl = new URL('https://do/users/online');
+	return stub.fetch(doUrl.toString());
+});
+
 app.get('/users/:username', async (c) => {
 	const username = c.req.param('username');
 	
@@ -257,14 +265,6 @@ app.put('/notifications/read', async (c) => {
 	} catch (error) {
 		return c.json({ success: false, error: "Failed to mark notifications as read" }, 500);
 	}
-});
-
-app.get('/users/online', async (c) => {
-	const id = c.env.DATA_DO.idFromName('default');
-	const stub = c.env.DATA_DO.get(id);
-
-	const doUrl = new URL('https://do/users/online');
-	return stub.fetch(doUrl.toString());
 });
 
 app.all('/ws', async (c) => {
