@@ -43,6 +43,33 @@ app.get('/users/online', async (c) => {
 	return stub.fetch(doUrl.toString());
 });
 
+app.get('/users/mutual', async (c) => {
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+
+	try {
+		const token = authHeader.replace("Bearer ", "");
+		const payloadBase64 = token.split(".")[1];
+		const payload = JSON.parse(atob(payloadBase64));
+		const userId = payload.properties?.id || payload.sub;
+
+		if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
+
+		const mutualUsers = await c.env.DATA_DB.prepare(`
+			SELECT u.id, u.username, u.yourname, u.avatar
+			FROM user u
+			INNER JOIN follows f1 ON f1.following_id = u.id AND f1.follower_id = ?
+			INNER JOIN follows f2 ON f2.follower_id = u.id AND f2.following_id = ?
+		`).bind(userId, userId).all();
+
+		return c.json({ success: true, users: mutualUsers.results });
+	} catch (error) {
+		return c.json({ success: false, error: "Failed to fetch mutual users" }, 500);
+	}
+});
+
 app.get('/users/:username', async (c) => {
 	const username = c.req.param('username');
 	
