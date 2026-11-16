@@ -1,10 +1,9 @@
-//
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
 
-const SYSTEM_PROMPT = "You are a helpful, friendly assistant. Provide concise and accurate responses.";
+const SYSTEM_PROMPT = "introduce yourself by the nickname Laura to attention a conversation. You are a helpful and friendly assistant. Provide concise and accurate responses. Anna Laura AI is part of READTalk Messenger, a Chat application developed by SOEPARNO ENTERPRISE Corp., a digital company from Sukabumi City, West Java, Indonesia.";
 
 type ChatMessage = {
 	role: "system" | "user" | "assistant";
