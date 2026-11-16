@@ -10,6 +10,7 @@ import { object, string } from "valibot";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { UpdateListHandler } from "./authentication/update";
+import { ArtificialIntelligenceHandler } from "./ai";
 
 export { Authentication } from "./authentication/auth";
 export { Room } from "./authentication/room";
@@ -370,6 +371,11 @@ app.all('/chats/*', async (c) => {
 	}
 });
 
+app.all('/ai/*', async (c) => {
+	const aiHandler = new ArtificialIntelligenceHandler(c.env);
+	return aiHandler.getApp().fetch(c.req.raw);
+});
+
 app.get('/settings', async (c) => {
 	const authHeader = c.req.header("Authorization");
 	if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -515,7 +521,7 @@ export default {
 			}
 		}
 
-		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications')) {
+		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai')) {
 			return app.fetch(request, env, ctx);
 		}
 
