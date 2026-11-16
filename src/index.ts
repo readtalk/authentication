@@ -10,7 +10,7 @@ import { object, string } from "valibot";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { UpdateListHandler } from "./authentication/update";
-import { ArtificialIntelligenceHandler } from "./artificial-intelligence";
+import { ArtificialIntelligenceHandler } from "./authentication/ai";
 
 export { Authentication } from "./authentication/auth";
 export { Room } from "./authentication/room";
