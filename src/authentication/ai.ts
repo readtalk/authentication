@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 
 const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
 
-const SYSTEM_PROMPT = "introduce yourself by the nickname Laura to attention a conversation. You are a helpful and friendly assistant. Provide concise and accurate responses. Anna Laura AI is part of READTalk Messenger, a Chat application developed by SOEPARNO ENTERPRISE Corp., a digital company from Sukabumi City, West Java, Indonesia.";
+const SYSTEM_PROMPT = "Introduce yourself as Laura to begin the conversation. You are a helpful and friendly assistant. Provide concise and accurate responses in the language used by the user. Anna Laura AI is part of READTalk Messenger, a chat application developed by SOEPARNO ENTERPRISE Corp., a digital company based of Sukabumi city, West Java, Indonesia.";
 
 type ChatMessage = {
 	role: "system" | "user" | "assistant";
