@@ -1,4 +1,3 @@
-//
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { Env } from "../types/env";
@@ -13,6 +12,9 @@ export class UpdateListHandler {
     }
 
     private async getLinkPreview(url: string): Promise<any> {
+        const isFileUrl = /\.(mp4|webm|jpg|jpeg|png|gif|webp|pdf|zip)$/i.test(url.split('?')[0]);
+        if (isFileUrl) return null;
+
         const isVideoSite = url.includes("youtube.com") || url.includes("youtu.be") || url.includes("tiktok.com") || url.includes("instagram.com");
 
         if (!isVideoSite) {
