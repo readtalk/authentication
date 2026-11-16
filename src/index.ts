@@ -430,8 +430,14 @@ app.post('/settings', async (c) => {
 			return c.json({ success: false, error: "Username must be 1-14 characters, only A-Z, 0-9, and underscore" }, 400);
 		}
 
+		const currentUser = await c.env.DATA_DB.prepare(
+			`SELECT username FROM user WHERE id = ?`
+		).bind(userId).first();
+
+		const isUsernameChanged = currentUser && currentUser.username !== username;
+
 		await c.env.DATA_DB.prepare(
-			`UPDATE user SET username = ?, yourname = ?, date_of_birth = ?, avatar = ?, header = ?, headline = ?, about = ?, socials = ?, location = ? WHERE id = ?`
+			`UPDATE user SET username = ?, yourname = ?, date_of_birth = ?, avatar = ?, header = ?, headline = ?, about = ?, socials = ?, location = ?, username_updated_at = CASE WHEN ? = 1 THEN unixepoch() ELSE username_updated_at END WHERE id = ?`
 		).bind(
 			username, 
 			yourname, 
@@ -442,6 +448,7 @@ app.post('/settings', async (c) => {
 			about || null, 
 			socials || null, 
 			location || null, 
+			isUsernameChanged ? 1 : 0,
 			userId
 		).run();
 
