@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { UpdateListHandler } from "./authentication/update";
 import { ArtificialIntelligenceHandler } from "./authentication/ai";
+import { CallHandler } from "./authentication/call";
 
 export { Authentication } from "./authentication/auth";
 export { Room } from "./authentication/room";
@@ -376,6 +377,11 @@ app.all('/ai/*', async (c) => {
 	return aiHandler.getApp().fetch(c.req.raw);
 });
 
+app.all('/call/*', async (c) => {
+	const callHandler = new CallHandler(c.env);
+	return callHandler.getApp().fetch(c.req.raw);
+});
+
 app.get('/settings', async (c) => {
 	const authHeader = c.req.header("Authorization");
 	if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -521,7 +527,7 @@ export default {
 			}
 		}
 
-		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai')) {
+		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai') || url.pathname.startsWith('/call')) {
 			return app.fetch(request, env, ctx);
 		}
 
