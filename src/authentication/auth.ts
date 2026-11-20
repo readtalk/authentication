@@ -36,6 +36,16 @@ export class Authentication extends DurableObject {
                 created_at INTEGER DEFAULT (unixepoch()),
                 UNIQUE(chat_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS active_call (
+                id TEXT PRIMARY KEY,
+                caller_id TEXT NOT NULL,
+                receiver_id TEXT NOT NULL,
+                chat_id TEXT,
+                type TEXT NOT NULL DEFAULT 'audio',
+                status TEXT NOT NULL DEFAULT 'ringing',
+                created_at INTEGER DEFAULT (unixepoch())
+            );
         `);
 
         this.setupRoutes();
@@ -86,7 +96,6 @@ export class Authentication extends DurableObject {
             const { name, description, is_private, member_ids } = await c.req.json();
             if (!name?.trim()) return c.json({ success: false, error: 'Chat name is required' }, 400);
 
-            // Pengecekan Duplikasi Chat Privat (1:1)
             if (is_private && member_ids && member_ids.length === 1) {
                 const targetUserId = member_ids[0];
                 
@@ -127,6 +136,74 @@ export class Authentication extends DurableObject {
             }
 
             return c.json({ success: true, chat_id: chatId, existing: false });
+        });
+
+        this.app.post('/calls', async (c) => {
+            const userId = c.req.header('X-User-Id');
+            if (!userId) return c.json({ success: false, error: 'No user ID' }, 401);
+
+            const { target_user_id, chat_id, type } = await c.req.json();
+            if (!target_user_id) return c.json({ success: false, error: 'Target user ID is required' }, 400);
+
+            const targetSocket = this.connections.get(target_user_id);
+            if (!targetSocket || targetSocket.readyState !== 1) {
+                return c.json({ success: false, error: 'User is offline' }, 404);
+            }
+
+            let finalChatId = chat_id;
+
+            if (!finalChatId) {
+                const existingChat = this.sql.exec(`
+                    SELECT ch.id FROM chat ch
+                    INNER JOIN chat_user cu1 ON ch.id = cu1.chat_id
+                    INNER JOIN chat_user cu2 ON ch.id = cu2.chat_id
+                    WHERE ch.is_private = 1 
+                    AND cu1.user_id = ? 
+                    AND cu2.user_id = ?
+                    LIMIT 1
+                `, userId, target_user_id).toArray();
+
+                if (existingChat.length > 0) {
+                    finalChatId = existingChat[0].id;
+                } else {
+                    finalChatId = crypto.randomUUID();
+                    this.sql.exec(
+                        `INSERT INTO chat (id, name, description, is_private) VALUES (?, ?, ?, ?)`,
+                        finalChatId, 'Private Chat', null, 1
+                    );
+                    this.sql.exec(
+                        `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
+                        crypto.randomUUID(), finalChatId, userId
+                    );
+                    this.sql.exec(
+                        `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
+                        crypto.randomUUID(), finalChatId, target_user_id
+                    );
+                }
+            }
+
+            const callId = crypto.randomUUID();
+            this.sql.exec(
+                `INSERT INTO active_call (id, caller_id, receiver_id, chat_id, type) VALUES (?, ?, ?, ?, ?)`,
+                callId, userId, target_user_id, finalChatId, type || 'audio'
+            );
+
+            const notification = JSON.stringify({
+                type: 'CALL_INCOMING',
+                callId,
+                chatId: finalChatId,
+                callerId: userId,
+                callType: type || 'audio'
+            });
+
+            try {
+                targetSocket.send(notification);
+            } catch {
+                this.connections.delete(target_user_id);
+                return c.json({ success: false, error: 'Failed to reach user' }, 500);
+            }
+
+            return c.json({ success: true, callId, chatId: finalChatId });
         });
     }
 
