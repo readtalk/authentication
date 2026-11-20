@@ -27,10 +27,6 @@
     "Room": {
       "type": "durable-object",
       "storage": "sqlite"
-    },
-    "Call": {
-      "type": "durable-object",
-      "storage": "sqlite"
     }
   },
   "durable_objects": {
@@ -42,10 +38,6 @@
       {
         "class_name": "Room",
         "name": "ROOM_DO"
-      },
-      {
-        "class_name": "Call",
-        "name": "CALL_DO"
       }
     ]
   },
