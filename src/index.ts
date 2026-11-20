@@ -1,4 +1,3 @@
-//
 import { issuer } from "@openauthjs/openauth";
 import {
 	CloudflareStorage,
@@ -373,6 +372,37 @@ app.all('/chats/*', async (c) => {
 	}
 });
 
+app.all('/calls', async (c) => {
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+	const token = authHeader.replace("Bearer ", "");
+	const payload = JSON.parse(atob(token.split(".")[1]));
+	const userId = payload.properties?.id || payload.sub;
+
+	if (!userId) {
+		return c.json({ success: false, error: "Invalid token" }, 401);
+	}
+
+	const id = c.env.DATA_DO.idFromName('default');
+	const stub = c.env.DATA_DO.get(id);
+
+	const doUrl = new URL('https://do' + c.req.path);
+	doUrl.search = c.req.url.split('?')[1] || '';
+
+	const newHeaders = new Headers(c.req.raw.headers);
+	newHeaders.set("X-User-Id", userId);
+
+	const newRequest = new Request(doUrl.toString(), {
+		method: c.req.method,
+		headers: newHeaders,
+		body: c.req.raw.body
+	});
+
+	return stub.fetch(newRequest);
+});
+
 app.all('/ai/*', async (c) => {
 	const aiHandler = new ArtificialIntelligenceHandler(c.env);
 	return aiHandler.getApp().fetch(c.req.raw);
@@ -528,7 +558,7 @@ export default {
 			}
 		}
 
-		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai') || url.pathname.startsWith('/call')) {
+		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai') || url.pathname.startsWith('/call') || url.pathname.startsWith('/calls')) {
 			return app.fetch(request, env, ctx);
 		}
 
