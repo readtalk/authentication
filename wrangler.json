@@ -13,13 +13,11 @@
       "id": "54f89be27a414fabaf381a919403582e"
     }
   ],
-  "d1_databases": [
-    {
-      "binding": "DATA_DB",
-      "database_name": "SERVER_D1",
-      "database_id": "9c6d47de-7136-494a-96aa-3e16648a4880"
-    }
-  ],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "SERVER_D1",
+    "database_id": "9c6d47de-7136-494a-96aa-3e16648a4880"
+ }],
   "ai": {
     "binding": "AI"
   },
