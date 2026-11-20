@@ -1,48 +1,56 @@
 {
-	"compatibility_date": "2025-10-08",
-	"main": "src/index.ts",
-	"name": "auth",
-	"upload_source_maps": true,
-	"kv_namespaces": [
-		{
-			"binding": "DATA_KV",
-			"id": "54f89be27a414fabaf381a919403582e"
-		}
-	],
-	"d1_databases": [
-		{
-			"binding": "DATA_DB",
-			"database_name": "SERVER_D1",
-			"database_id": "9c6d47de-7136-494a-96aa-3e16648a4880"
-		}
-	],
-	"ai": {
-		"binding": "AI"
-	},
-	"exports": {
-		"Authentication": {
-			"type": "durable-object",
-			"storage": "sqlite"
-		},
-		"Room": {
-			"type": "durable-object",
-			"storage": "sqlite"
-		}
-	},
-	"durable_objects": {
-		"bindings": [
-			{
-				"class_name": "Authentication",
-				"name": "DATA_DO"
-			},
-			{
-				"class_name": "Room",
-				"name": "ROOM_DO"
-			}
-		]
-	},
-	"observability": {
-		"enabled": true
-	},
-	"compatibility_flags": ["nodejs_compat"]
+  "compatibility_date": "2025-10-08",
+  "main": "src/index.ts",
+  "name": "auth",
+  "upload_source_maps": true,
+  "kv_namespaces": [
+    {
+      "binding": "DATA_KV",
+      "id": "5Af89be27a414afab381a919a03582e"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DATA_DB",
+      "database_name": "SERVER_D1",
+      "database_id": "9c6d47de-7136-404a-96aa-3e16648a4880"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "exports": {
+    "Authentication": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "Room": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "Call": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Authentication",
+        "name": "DATA_DO"
+      },
+      {
+        "class_name": "Room",
+        "name": "ROOM_DO"
+      },
+      {
+        "class_name": "Call",
+        "name": "CALL_DO"
+      }
+    ]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "compatibility_flags": ["nodejs_compat"]
 }
