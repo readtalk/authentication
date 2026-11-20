@@ -6,14 +6,14 @@
   "kv_namespaces": [
     {
       "binding": "DATA_KV",
-      "id": "5Af89be27a414afab381a919a03582e"
+      "id": "5Af89be27a4d14fabaF381a919403582e"
     }
   ],
   "d1_databases": [
     {
       "binding": "DATA_DB",
       "database_name": "SERVER_D1",
-      "database_id": "9c6d47de-7136-404a-96aa-3e16648a4880"
+      "database_id": "9c6d47de-7136-409a-96aa-3e16648a4880"
     }
   ],
   "ai": {
