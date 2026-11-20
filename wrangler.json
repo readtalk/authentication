@@ -3,17 +3,21 @@
   "main": "src/index.ts",
   "name": "auth",
   "upload_source_maps": true,
+  "vars": {
+    "CALL_APP_ID": "fddc2d745a8682aea944b89179d4e8e1",
+    "CALL_TURN_KEY_ID": "f2f8c6d8f31d7b0a1adf2bf76cd5b45b"
+  },
   "kv_namespaces": [
     {
       "binding": "DATA_KV",
-      "id": "54f89be27a414fabaf381a919403582e"
+      "id": "54f89bec27ad414faba f381a919a03582e"
     }
   ],
   "d1_databases": [
     {
       "binding": "DATA_DB",
       "database_name": "SERVER_D1",
-      "database_id": "9c6d47de-7136-494a-96aa-3e16648a4880"
+      "database_id": "9c6d47de-7136-494a-96ae-3e16648a4880"
     }
   ],
   "ai": {
