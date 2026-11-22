@@ -46,10 +46,12 @@ export class Authentication extends DurableObject {
 
   private setupRoutes() {
     this.app.use("*", cors());
+
     this.app.get("/users/online", async (c) => {
       const onlineUserIds = Array.from(this.connections.keys());
       return c.json({ success: true, onlineUsers: onlineUserIds });
     });
+
     this.app.get("/chats", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
@@ -60,6 +62,7 @@ export class Authentication extends DurableObject {
       const formatted = chats.map((ch: any) => ({ ...ch, member_ids: ch.member_ids ? ch.member_ids.split(",") : [] }));
       return c.json({ success: true, chats: formatted });
     });
+
     this.app.post("/chats", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
@@ -85,6 +88,7 @@ export class Authentication extends DurableObject {
       }
       return c.json({ success: true, chat_id: chatId, existing: false });
     });
+
     this.app.post("/call/create", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
@@ -125,15 +129,10 @@ export class Authentication extends DurableObject {
         this.sql.exec(`DELETE FROM active_call WHERE id = ?`, callId);
         return c.json({ success: true, callId, chatId: finalChatId, offline: true });
       }
-      await this.notify(finalChatId, {
-        type: "CALL_INCOMING",
-        callId,
-        chatId: finalChatId,
-        callerId: userId,
-        callType: finalType,
-      });
+      await this.notify(finalChatId, { type: "CALL_INCOMING", callId, chatId: finalChatId, callerId: userId, callType: finalType });
       return c.json({ success: true, callId, chatId: finalChatId });
     });
+
     this.app.get("/call/info", async (c) => {
       const callId = c.req.query("callId");
       if (!callId) return c.json({ success: false, error: "callId required" }, 400);
@@ -141,6 +140,7 @@ export class Authentication extends DurableObject {
       if (call.length === 0) return c.json({ success: false, error: "Call not found" }, 404);
       return c.json({ success: true, call: call[0] });
     });
+
     this.app.post("/call/:id/accept", async (c) => {
       const callId = c.req.param("id");
       const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray()[0] as any;
@@ -149,6 +149,7 @@ export class Authentication extends DurableObject {
       await this.notify(call.chat_id, { type: "CALL_ACCEPTED", callId, chatId: call.chat_id });
       return c.json({ success: true, callId });
     });
+
     this.app.post("/call/:id/decline", async (c) => {
       const callId = c.req.param("id");
       const closed = await this.closeCall(callId, "declined");
@@ -156,6 +157,7 @@ export class Authentication extends DurableObject {
       await this.notify(closed.chat_id, { type: "CALL_DECLINED", callId });
       return c.json({ success: true, callId });
     });
+
     this.app.post("/call/:id/end", async (c) => {
       const callId = c.req.param("id");
       const closed = await this.closeCall(callId, "completed");
@@ -163,6 +165,7 @@ export class Authentication extends DurableObject {
       await this.notify(closed.chat_id, { type: "CALL_ENDED", callId });
       return c.json({ success: true, callId, duration: closed.duration });
     });
+
     this.app.post("/call/:id/missed", async (c) => {
       const callId = c.req.param("id");
       const closed = await this.closeCall(callId, "missed");
@@ -184,6 +187,53 @@ export class Authentication extends DurableObject {
     }
   }
 
+  // FIX: kirim SDP cuma ke lawan, lookup pake active_call (callId), bukan chat_user (chatId)
+  private forwardCallSignal(userId: string, data: any, realType: string) {
+    const callId = data.callId || data.call_id;
+    const chatId = data.chatId || data.chat_id;
+
+    // 1. Coba lookup pake callId dulu (ini yang dikirim ROOM_DO / CallOverlay)
+    let call: any = null;
+    if (callId) {
+      call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray()[0] as any;
+    }
+    // 2. Fallback: kalo cuma ada chatId, ambil active_call terakhir di chat itu
+    if (!call && chatId) {
+      call = this.sql.exec(`SELECT * FROM active_call WHERE chat_id = ? ORDER BY created_at DESC LIMIT 1`, chatId).toArray()[0] as any;
+    }
+
+    const payload = JSON.stringify({
+      type: realType,
+      callId: call?.id || callId,
+      chatId: call?.chat_id || chatId,
+      fromId: userId,
+      sdp: data.sdp ?? data.offer ?? data.answer ?? null,
+      candidate: data.candidate ?? null,
+    });
+
+    // Kalo ketemu call-nya, kirim cuma ke lawan. Ini yang bikin Accept pindah ke ROOM_DO.
+    if (call) {
+      const targetId = userId === call.caller_id ? call.receiver_id : call.caller_id;
+      const targetSocket = this.connections.get(targetId);
+      if (targetSocket && targetSocket.readyState === 1) {
+        try { targetSocket.send(payload); } catch { this.connections.delete(targetId); }
+      }
+      return;
+    }
+
+    // Fallback lama: kalo call gak ketemu, broadcast via chat_user (biar gak pecah buat client lama)
+    if (chatId) {
+      const users = this.sql.exec(`SELECT user_id FROM chat_user WHERE chat_id = ?`, chatId).toArray() as { user_id: string }[];
+      for (const { user_id } of users) {
+        if (user_id === userId) continue;
+        const socket = this.connections.get(user_id);
+        if (socket && socket.readyState === 1) {
+          try { socket.send(payload); } catch { this.connections.delete(user_id); }
+        }
+      }
+    }
+  }
+
   public async clientConnected(userId?: string) {
     const [client, server] = Object.values(new WebSocketPair());
     if (!userId) {
@@ -196,37 +246,43 @@ export class Authentication extends DurableObject {
     server.addEventListener("message", async (event) => {
       try {
         const data = JSON.parse(event.data as string);
+
         if (data.type === "DECLINE_CALL") {
           const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, data.callId).toArray()[0] as any;
           if (!call) return;
           await this.closeCall(data.callId, "declined");
           await this.notify(call.chat_id, { type: "CALL_DECLINED", callId: data.callId });
         }
+
         if (data.type === "END_CALL") {
           const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, data.callId).toArray()[0] as any;
           if (!call) return;
           const closed = await this.closeCall(data.callId, "completed");
           await this.notify(call.chat_id, { type: "CALL_ENDED", callId: data.callId, duration: closed?.duration || 0 });
         }
+
         if (data.type === "ACCEPT_CALL") {
           const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, data.callId).toArray()[0] as any;
           if (!call) return;
           this.sql.exec(`UPDATE active_call SET status = 'accepted' WHERE id = ?`, data.callId);
           await this.notify(call.chat_id, { type: "CALL_ACCEPTED", callId: data.callId, chatId: call.chat_id });
         }
-        
-        if (data.type === "CALL_OFFER" || data.type === "CALL_ANSWER" || data.type === "CALL_ICE") {
-          if (!data.chatId) return;
-          await this.notify(data.chatId, {
-            type: data.type,
-            callId: data.callId,
-            chatId: data.chatId,
-            fromId: userId,
-            sdp: data.sdp,
-            candidate: data.candidate,
-          });
+
+        // === INI YANG GUE BENERIN ===
+        // Dulu: cuma CALL_OFFER/ANSWER/ICE + wajib chatId + notify ke semua chat_user
+        // Sekarang: SIGNAL juga diterima, callId dipake, kirim cuma ke lawan
+        if (data.type === "SIGNAL") {
+          // CallOverlay kirim: { type: "SIGNAL", callId, signalType: "CALL_OFFER", sdp }
+          // atau { type: "SIGNAL", callId, signal: "CALL_OFFER", ... }
+          // atau { type: "SIGNAL", callId, kind: "CALL_OFFER", ... }
+          const inner = data.signalType || data.signal || data.kind || data.subtype || data.event;
+          const realType = typeof inner === "string" && inner.startsWith("CALL_") ? inner : "CALL_OFFER";
+          this.forwardCallSignal(userId, data, realType);
         }
-        
+
+        if (data.type === "CALL_OFFER" || data.type === "CALL_ANSWER" || data.type === "CALL_ICE" || data.type === "CALL_READY") {
+          this.forwardCallSignal(userId, data, data.type);
+        }
       } catch {}
     });
     server.addEventListener("close", async () => {
