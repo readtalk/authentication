@@ -4,40 +4,18 @@ import { cors } from "hono/cors";
 export class CallHandler {
   private app: Hono = new Hono();
   private env: any;
+
   constructor(env: any) {
     this.env = env;
     this.setupRoutes();
   }
-  
+
   private async ensureTable() {
     await this.env.DATA_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS call_history (
-        id TEXT PRIMARY KEY,
-        caller_id TEXT NOT NULL,
-        receiver_id TEXT NOT NULL,
-        chat_id TEXT,
-        type TEXT DEFAULT 'audio',
-        status TEXT NOT NULL,
-        duration INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`
+      `CREATE TABLE IF NOT EXISTS call_history ( id TEXT PRIMARY KEY, caller_id TEXT NOT NULL, receiver_id TEXT NOT NULL, chat_id TEXT, type TEXT DEFAULT 'audio', status TEXT NOT NULL, duration INTEGER DEFAULT 0, created_at INTEGER )`
     ).run();
   }
-  
-  private async ensureLiveTable() {
-    await this.env.DATA_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS calls (
-        id TEXT PRIMARY KEY,
-        caller_id TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        chat_id TEXT,
-        type TEXT DEFAULT 'audio',
-        status TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`
-    ).run();
-  }
-  
+
   private getUserId(c: any) {
     const authHeader = c.req.header("Authorization");
     if (!authHeader) return "";
@@ -45,35 +23,27 @@ export class CallHandler {
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
       return payload.properties?.id || payload.sub || "";
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   }
-  
-  private async broadcast(userIds: string[], data: any) {
-    try {
-      const id = this.env.DATA_DO.idFromName("default");
-      const stub = this.env.DATA_DO.get(id);
-      await stub.fetch("https://do/broadcast", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userIds, data }),
-      });
-    } catch {}
-  }
-  
-  private async clearActiveCall(callId: string) {
-    try {
-      const id = this.env.DATA_DO.idFromName("default");
-      const stub = this.env.DATA_DO.get(id);
-      await stub.fetch(`https://do/calls/${callId}/cleanup`, {
-        method: "POST",
-      });
-    } catch {}
+
+  private async forwardToAuth(path: string, method: string, userId: string, body?: any) {
+    const id = this.env.DATA_DO.idFromName("default");
+    const stub = this.env.DATA_DO.get(id);
+    const headers: any = { "Content-Type": "application/json", "X-User-Id": userId };
+    if (c_req_auth_header) headers["Authorization"] = c_req_auth_header;
+    return stub.fetch(`https://do${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
   }
 
   private setupRoutes() {
-    this.app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }));
-    
-    this.app.post('/call/credentials', async (c) => {
+    this.app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"], allowHeaders: ["Content-Type", "Authorization"] }));
+
+    this.app.post("/call/credentials", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -93,11 +63,7 @@ export class CallHandler {
         }
         const response = await fetch(
           `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
-          {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ ttl: 86400 })
-          }
+          { method: "POST", headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ ttl: 86400 }) }
         );
         if (!response.ok) {
           const errText = await response.text();
@@ -112,8 +78,8 @@ export class CallHandler {
         return c.json({ success: false, error: "Failed to generate call credentials" }, 500);
       }
     });
-    
-    this.app.post('/call/session', async (c) => {
+
+    this.app.post("/call/session", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -133,11 +99,7 @@ export class CallHandler {
         }
         const res = await fetch(
           `https://rtc.live.cloudflare.com/v1/apps/${appId}/sessions/new`,
-          {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${appSecret}`, "Content-Type": "application/json" },
-            body: JSON.stringify({})
-          }
+          { method: "POST", headers: { Authorization: `Bearer ${appSecret}`, "Content-Type": "application/json" }, body: JSON.stringify({}) }
         );
         if (!res.ok) {
           const errText = await res.text();
@@ -153,82 +115,69 @@ export class CallHandler {
         return c.json({ success: false, error: "Failed to create session" }, 500);
       }
     });
-    
-    this.app.post('/call/create', async (c) => {
+
+    this.app.post("/call/create", async (c) => {
       const callerId = this.getUserId(c);
       if (!callerId) return c.json({ success: false, error: "Unauthorized" }, 401);
       const body: any = await c.req.json().catch(() => ({}));
       const targetId = body.target_user_id || body.targetId || body.receiver_id || "";
       const callType = body.type || "audio";
-      const chatId = body.chat_id || body.chatId || [callerId, targetId].sort().join("_");
+      const chatId = body.chat_id || body.chatId || "";
       if (!targetId) return c.json({ success: false, error: "target required" }, 400);
-      
-      await this.ensureLiveTable();
-      const callId = crypto.randomUUID();
-      
-      await this.env.DATA_DB.prepare(
-        `INSERT INTO calls (id, caller_id, target_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'ringing')`
-      ).bind(callId, callerId, targetId, chatId, callType).run();
-      
       const id = this.env.DATA_DO.idFromName("default");
       const stub = this.env.DATA_DO.get(id);
-      await stub.fetch("https://do/calls", {
+      const res = await stub.fetch("https://do/call/create", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-User-Id": callerId },
-        body: JSON.stringify({ target_user_id: targetId, chat_id: chatId, type: callType, call_id: callId })
+        body: JSON.stringify({ target_user_id: targetId, chat_id: chatId || undefined, type: callType }),
       });
-      
-      return c.json({ success: true, callId, chatId });
+      const data: any = await res.json();
+      return c.json(data, res.status as any);
     });
-    
-    this.app.post('/call/:id/accept', async (c) => {
+
+    this.app.post("/call/:id/accept", async (c) => {
+      const callerId = this.getUserId(c);
+      if (!callerId) return c.json({ success: false, error: "Unauthorized" }, 401);
       const callId = c.req.param("id");
-      await this.ensureLiveTable();
-      
-      const row: any = await this.env.DATA_DB.prepare(`SELECT * FROM calls WHERE id = ?`).bind(callId).first();
-      if (!row) return c.json({ success: false }, 404);
-      
-      await this.env.DATA_DB.prepare(`UPDATE calls SET status = 'accepted' WHERE id = ?`).bind(callId).run();
-      
-      await this.broadcast([row.caller_id, row.target_id], { type: "CALL_ACCEPTED", callId, callerId: row.caller_id, targetId: row.target_id });
-      await this.clearActiveCall(callId);
-      
-      return c.json({ success: true });
+      const id = this.env.DATA_DO.idFromName("default");
+      const stub = this.env.DATA_DO.get(id);
+      const res = await stub.fetch(`https://do/call/${callId}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": callerId },
+      });
+      const data: any = await res.json();
+      return c.json(data, res.status as any);
     });
-    
-    this.app.post('/call/:id/decline', async (c) => {
+
+    this.app.post("/call/:id/decline", async (c) => {
+      const callerId = this.getUserId(c);
+      if (!callerId) return c.json({ success: false, error: "Unauthorized" }, 401);
       const callId = c.req.param("id");
-      await this.ensureLiveTable();
-      
-      const row: any = await this.env.DATA_DB.prepare(`SELECT * FROM calls WHERE id = ?`).bind(callId).first();
-      if (!row) return c.json({ success: false }, 404);
-      
-      await this.env.DATA_DB.prepare(`UPDATE calls SET status = 'declined' WHERE id = ?`).bind(callId).run();
-      
-      await this.broadcast([row.caller_id, row.target_id], { type: "CALL_DECLINED", callId, callerId: row.caller_id, targetId: row.target_id });
-      await this.clearActiveCall(callId);
-      
-      await this.env.DATA_DB.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId).run();
-      return c.json({ success: true });
+      const id = this.env.DATA_DO.idFromName("default");
+      const stub = this.env.DATA_DO.get(id);
+      const res = await stub.fetch(`https://do/call/${callId}/decline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": callerId },
+      });
+      const data: any = await res.json();
+      return c.json(data, res.status as any);
     });
-    
-    this.app.post('/call/:id/end', async (c) => {
+
+    this.app.post("/call/:id/end", async (c) => {
+      const callerId = this.getUserId(c);
+      if (!callerId) return c.json({ success: false, error: "Unauthorized" }, 401);
       const callId = c.req.param("id");
-      await this.ensureLiveTable();
-      
-      const row: any = await this.env.DATA_DB.prepare(`SELECT * FROM calls WHERE id = ?`).bind(callId).first();
-      if (!row) return c.json({ success: false }, 404);
-      
-      await this.env.DATA_DB.prepare(`UPDATE calls SET status = 'ended' WHERE id = ?`).bind(callId).run();
-      
-      await this.broadcast([row.caller_id, row.target_id], { type: "CALL_ENDED", callId, callerId: row.caller_id, targetId: row.target_id });
-      await this.clearActiveCall(callId);
-      
-      await this.env.DATA_DB.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId).run();
-      return c.json({ success: true });
+      const id = this.env.DATA_DO.idFromName("default");
+      const stub = this.env.DATA_DO.get(id);
+      const res = await stub.fetch(`https://do/call/${callId}/end`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": callerId },
+      });
+      const data: any = await res.json();
+      return c.json(data, res.status as any);
     });
-    
-    this.app.post('/call/log', async (c) => {
+
+    this.app.post("/call/log", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -248,15 +197,15 @@ export class CallHandler {
         }
         await this.env.DATA_DB.prepare(
           `INSERT INTO call_history (id, caller_id, receiver_id, chat_id, type, status, duration) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = ?, duration = ?`
-        ).bind(call_id, userId, receiver_id, chat_id || null, type || 'audio', status, duration || 0, status, duration || 0).run();
+        ).bind(call_id, userId, receiver_id, chat_id || null, type || "audio", status, duration || 0, status, duration || 0).run();
         return c.json({ success: true, call_id });
       } catch (error) {
         console.error("Call log error:", error);
         return c.json({ success: false, error: "Failed to save call log" }, 500);
       }
     });
-    
-    this.app.get('/call/history', async (c) => {
+
+    this.app.get("/call/history", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -280,6 +229,8 @@ export class CallHandler {
       }
     });
   }
-  
-  public getApp(): Hono { return this.app; }
+
+  public getApp(): Hono {
+    return this.app;
+  }
 }
