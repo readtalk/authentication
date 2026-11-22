@@ -19,34 +19,10 @@ export class Authentication extends DurableObject {
 
   private async setup() {
     this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS user_id (
-        id TEXT PRIMARY KEY
-      );
-      CREATE TABLE IF NOT EXISTS chat (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT,
-        is_private INTEGER DEFAULT 0,
-        created_at INTEGER DEFAULT (unixepoch())
-      );
-      CREATE TABLE IF NOT EXISTS chat_user (
-        id TEXT PRIMARY KEY,
-        chat_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        created_at INTEGER DEFAULT (unixepoch()),
-        UNIQUE(chat_id, user_id)
-      );
-      CREATE TABLE IF NOT EXISTS active_call (
-        id TEXT PRIMARY KEY,
-        caller_id TEXT NOT NULL,
-        receiver_id TEXT NOT NULL,
-        chat_id TEXT NOT NULL,
-        type TEXT DEFAULT 'audio',
-        status TEXT DEFAULT 'ringing',
-        created_at INTEGER DEFAULT (unixepoch()),
-        closed_at INTEGER,
-        expires_at INTEGER
-      );
+      CREATE TABLE IF NOT EXISTS user_id ( id TEXT PRIMARY KEY );
+      CREATE TABLE IF NOT EXISTS chat ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, is_private INTEGER DEFAULT 0, created_at INTEGER DEFAULT (unixepoch()) );
+      CREATE TABLE IF NOT EXISTS chat_user ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), UNIQUE(chat_id, user_id) );
+      CREATE TABLE IF NOT EXISTS active_call ( id TEXT PRIMARY KEY, caller_id TEXT NOT NULL, receiver_id TEXT NOT NULL, chat_id TEXT NOT NULL, type TEXT DEFAULT 'audio', status TEXT DEFAULT 'ringing', created_at INTEGER DEFAULT (unixepoch()), closed_at INTEGER, expires_at INTEGER );
     `);
     this.setupRoutes();
   }
@@ -70,12 +46,10 @@ export class Authentication extends DurableObject {
 
   private setupRoutes() {
     this.app.use("*", cors());
-
     this.app.get("/users/online", async (c) => {
       const onlineUserIds = Array.from(this.connections.keys());
       return c.json({ success: true, onlineUsers: onlineUserIds });
     });
-
     this.app.get("/chats", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
@@ -86,7 +60,6 @@ export class Authentication extends DurableObject {
       const formatted = chats.map((ch: any) => ({ ...ch, member_ids: ch.member_ids ? ch.member_ids.split(",") : [] }));
       return c.json({ success: true, chats: formatted });
     });
-
     this.app.post("/chats", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
@@ -112,7 +85,6 @@ export class Authentication extends DurableObject {
       }
       return c.json({ success: true, chat_id: chatId, existing: false });
     });
-
     this.app.post("/call/create", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
@@ -162,7 +134,6 @@ export class Authentication extends DurableObject {
       });
       return c.json({ success: true, callId, chatId: finalChatId });
     });
-
     this.app.get("/call/info", async (c) => {
       const callId = c.req.query("callId");
       if (!callId) return c.json({ success: false, error: "callId required" }, 400);
@@ -170,7 +141,6 @@ export class Authentication extends DurableObject {
       if (call.length === 0) return c.json({ success: false, error: "Call not found" }, 404);
       return c.json({ success: true, call: call[0] });
     });
-
     this.app.post("/call/:id/accept", async (c) => {
       const callId = c.req.param("id");
       const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray()[0] as any;
@@ -179,7 +149,6 @@ export class Authentication extends DurableObject {
       await this.notify(call.chat_id, { type: "CALL_ACCEPTED", callId, chatId: call.chat_id });
       return c.json({ success: true, callId });
     });
-
     this.app.post("/call/:id/decline", async (c) => {
       const callId = c.req.param("id");
       const closed = await this.closeCall(callId, "declined");
@@ -187,7 +156,6 @@ export class Authentication extends DurableObject {
       await this.notify(closed.chat_id, { type: "CALL_DECLINED", callId });
       return c.json({ success: true, callId });
     });
-
     this.app.post("/call/:id/end", async (c) => {
       const callId = c.req.param("id");
       const closed = await this.closeCall(callId, "completed");
@@ -195,7 +163,6 @@ export class Authentication extends DurableObject {
       await this.notify(closed.chat_id, { type: "CALL_ENDED", callId });
       return c.json({ success: true, callId, duration: closed.duration });
     });
-
     this.app.post("/call/:id/missed", async (c) => {
       const callId = c.req.param("id");
       const closed = await this.closeCall(callId, "missed");
@@ -247,6 +214,19 @@ export class Authentication extends DurableObject {
           this.sql.exec(`UPDATE active_call SET status = 'accepted' WHERE id = ?`, data.callId);
           await this.notify(call.chat_id, { type: "CALL_ACCEPTED", callId: data.callId, chatId: call.chat_id });
         }
+        
+        if (data.type === "CALL_OFFER" || data.type === "CALL_ANSWER" || data.type === "CALL_ICE") {
+          if (!data.chatId) return;
+          await this.notify(data.chatId, {
+            type: data.type,
+            callId: data.callId,
+            chatId: data.chatId,
+            fromId: userId,
+            sdp: data.sdp,
+            candidate: data.candidate,
+          });
+        }
+        
       } catch {}
     });
     server.addEventListener("close", async () => {
