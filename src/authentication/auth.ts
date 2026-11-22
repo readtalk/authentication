@@ -8,7 +8,6 @@ export class Authentication extends DurableObject {
   private app: Hono = new Hono();
   public sql: SqlStorage;
   public connections = new Map<string, WebSocket>();
-  private activeCalls = new Map<string, { callerId: string; receiverId: string; chatId: string; type: string }>();
   private env: any;
 
   constructor(ctx: DurableObjectState, env: any) {
@@ -36,6 +35,15 @@ export class Authentication extends DurableObject {
         user_id TEXT NOT NULL,
         created_at INTEGER DEFAULT (unixepoch()),
         UNIQUE(chat_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS active_call (
+        id TEXT PRIMARY KEY,
+        caller_id TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        type TEXT DEFAULT 'audio',
+        status TEXT DEFAULT 'ringing',
+        created_at INTEGER DEFAULT (unixepoch())
       );
     `);
     this.setupRoutes();
@@ -145,7 +153,10 @@ export class Authentication extends DurableObject {
 
       const callId = crypto.randomUUID();
       const finalType = type || 'audio';
-      this.activeCalls.set(callId, { callerId: userId, receiverId: target_user_id, chatId: finalChatId, type: finalType });
+      this.sql.exec(
+        `INSERT INTO active_call (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'ringing')`,
+        callId, userId, target_user_id, finalChatId, finalType
+      );
 
       const targetSocket = this.connections.get(target_user_id);
       if (!targetSocket || targetSocket.readyState !== 1) {
@@ -155,6 +166,7 @@ export class Authentication extends DurableObject {
         await this.env.DATA_DB.prepare(
           `INSERT INTO notifications (id, user_id, actor_id, type) VALUES (?, ?, ?, 'missed_call')`
         ).bind(crypto.randomUUID(), target_user_id, userId).run();
+        this.sql.exec(`DELETE FROM active_call WHERE id = ?`, callId);
         return c.json({ success: true, callId, chatId: finalChatId, offline: true });
       }
 
@@ -167,6 +179,14 @@ export class Authentication extends DurableObject {
       });
 
       return c.json({ success: true, callId, chatId: finalChatId });
+    });
+
+    this.app.get('/calls/info', async (c) => {
+      const callId = c.req.query('callId');
+      if (!callId) return c.json({ success: false, error: 'callId required' }, 400);
+      const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray();
+      if (call.length === 0) return c.json({ success: false, error: 'Call not found' }, 404);
+      return c.json({ success: true, call: call[0] });
     });
   }
 
@@ -203,27 +223,27 @@ export class Authentication extends DurableObject {
       try {
         const data = JSON.parse(event.data as string);
         if (data.type === 'REJECT_CALL') {
-          const call = this.activeCalls.get(data.callId);
+          const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, data.callId).toArray()[0] as any;
           if (!call) return;
-          await this.notify(call.chatId, { type: 'CALL_REJECTED', callId: data.callId });
+          await this.notify(call.chat_id, { type: 'CALL_REJECTED', callId: data.callId });
           await this.env.DATA_DB.prepare(
             `INSERT INTO call_history (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'rejected') ON CONFLICT(id) DO UPDATE SET status = 'rejected'`
-          ).bind(data.callId, call.callerId, call.receiverId, call.chatId, call.type).run();
-          this.activeCalls.delete(data.callId);
+          ).bind(call.id, call.caller_id, call.receiver_id, call.chat_id, call.type).run();
+          this.sql.exec(`DELETE FROM active_call WHERE id = ?`, data.callId);
         }
         if (data.type === 'CANCEL_CALL') {
-          const call = this.activeCalls.get(data.callId);
+          const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, data.callId).toArray()[0] as any;
           if (!call) return;
-          await this.notify(call.chatId, { type: 'CALL_CANCELLED', callId: data.callId });
+          await this.notify(call.chat_id, { type: 'CALL_CANCELLED', callId: data.callId });
           await this.env.DATA_DB.prepare(
             `INSERT INTO call_history (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'cancelled') ON CONFLICT(id) DO UPDATE SET status = 'cancelled'`
-          ).bind(data.callId, call.callerId, call.receiverId, call.chatId, call.type).run();
-          this.activeCalls.delete(data.callId);
+          ).bind(call.id, call.caller_id, call.receiver_id, call.chat_id, call.type).run();
+          this.sql.exec(`DELETE FROM active_call WHERE id = ?`, data.callId);
         }
         if (data.type === 'ACCEPT_CALL') {
-          const call = this.activeCalls.get(data.callId);
+          const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, data.callId).toArray()[0] as any;
           if (!call) return;
-          await this.notify(call.chatId, { type: 'CALL_ACCEPTED', callId: data.callId, chatId: call.chatId });
+          await this.notify(call.chat_id, { type: 'CALL_ACCEPTED', callId: data.callId, chatId: call.chat_id });
         }
       } catch {}
     });
