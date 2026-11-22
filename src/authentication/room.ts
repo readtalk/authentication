@@ -7,6 +7,7 @@ import { Browsable } from "@outerbase/browsable-durable-object";
 export class Room extends DurableObject<Env> {
     private app: Hono = new Hono();
     public sql: SqlStorage;
+    public connections = new Map<string, WebSocket>();
 
     constructor(ctx: DurableObjectState, env: Env) {
         super(ctx, env);
@@ -22,6 +23,15 @@ export class Room extends DurableObject<Env> {
                 user_id TEXT NOT NULL,
                 content TEXT NOT NULL,
                 assets TEXT DEFAULT '[]',
+                created_at INTEGER DEFAULT (unixepoch())
+            );
+            CREATE TABLE IF NOT EXISTS active_call (
+                id TEXT PRIMARY KEY,
+                caller_id TEXT NOT NULL,
+                receiver_id TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                type TEXT DEFAULT 'audio',
+                status TEXT DEFAULT 'ringing',
                 created_at INTEGER DEFAULT (unixepoch())
             );
         `);
@@ -138,10 +148,127 @@ export class Room extends DurableObject<Env> {
                 }, 500);
             }
         });
+
+        this.app.post('/calls/:id/accept', async (c) => {
+            const callId = c.req.param('id');
+            const callData = await c.req.json();
+            
+            const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray()[0] as any;
+            if (!call) {
+                this.sql.exec(
+                    `INSERT INTO active_call (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'accepted')`,
+                    callId, callData.caller_id, callData.receiver_id, callData.chat_id, callData.type
+                );
+            } else {
+                this.sql.exec(`UPDATE active_call SET status = 'accepted' WHERE id = ?`, callId);
+            }
+
+            const authId = this.env.DATA_DO.idFromName('default');
+            const authStub = this.env.DATA_DO.get(authId);
+            await (authStub as any).notify(callData.chat_id, {
+                type: 'CALL_ACCEPTED',
+                callId,
+                chatId: callData.chat_id,
+                callerId: callData.caller_id,
+                receiverId: callData.receiver_id
+            });
+
+            return c.json({ success: true });
+        });
+
+        this.app.post('/calls/:id/decline', async (c) => {
+            const callId = c.req.param('id');
+            const callData = await c.req.json();
+
+            this.sql.exec(`DELETE FROM active_call WHERE id = ?`, callId);
+
+            await this.env.DATA_DB.prepare(
+                `INSERT INTO call_history (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'declined') ON CONFLICT(id) DO UPDATE SET status = 'declined'`
+            ).bind(callId, callData.caller_id, callData.receiver_id, callData.chat_id, callData.type).run();
+
+            const authId = this.env.DATA_DO.idFromName('default');
+            const authStub = this.env.DATA_DO.get(authId);
+            await (authStub as any).notify(callData.chat_id, {
+                type: 'CALL_DECLINED',
+                callId,
+                chatId: callData.chat_id,
+                callerId: callData.caller_id,
+                receiverId: callData.receiver_id
+            });
+
+            return c.json({ success: true });
+        });
+
+        this.app.post('/calls/:id/end', async (c) => {
+            const callId = c.req.param('id');
+            const callData = await c.req.json();
+
+            const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray()[0] as any;
+            if (!call) {
+                return c.json({ success: false, error: 'Call not found' }, 404);
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const duration = now - call.created_at;
+
+            await this.env.DATA_DB.prepare(
+                `INSERT INTO call_history (id, caller_id, receiver_id, chat_id, type, status, duration) VALUES (?, ?, ?, ?, ?, 'completed', ?) ON CONFLICT(id) DO UPDATE SET status = 'completed', duration = ?`
+            ).bind(callId, call.caller_id, call.receiver_id, call.chat_id, call.type, duration, duration).run();
+
+            this.sql.exec(`DELETE FROM active_call WHERE id = ?`, callId);
+
+            const authId = this.env.DATA_DO.idFromName('default');
+            const authStub = this.env.DATA_DO.get(authId);
+            await (authStub as any).notify(callData.chat_id, {
+                type: 'CALL_ENDED',
+                callId,
+                chatId: callData.chat_id,
+                callerId: call.caller_id,
+                receiverId: call.receiver_id
+            });
+
+            return c.json({ success: true });
+        });
     }
 
     async fetch(request: Request): Promise<Response> {
+        const url = new URL(request.url);
+        if (url.pathname === '/ws') {
+            if (request.headers.get('upgrade') === 'websocket') {
+                const userId = url.searchParams.get('userId') ?? '';
+                return this.clientConnected(userId);
+            }
+            return new Response('Expected WebSocket', { status: 400 });
+        }
         return this.app.fetch(request);
+    }
+
+    private async clientConnected(userId: string) {
+        const [client, server] = Object.values(new WebSocketPair());
+        this.connections.set(userId, server);
+        server.accept();
+
+        server.addEventListener('message', async (event) => {
+            try {
+                const data = JSON.parse(event.data as string);
+                if (data.type === 'SIGNAL') {
+                    const targetSocket = this.connections.get(data.target);
+                    if (targetSocket && targetSocket.readyState === 1) {
+                        targetSocket.send(JSON.stringify({
+                            type: 'SIGNAL',
+                            from: userId,
+                            signal: data.signal
+                        }));
+                    }
+                }
+            } catch (e) {}
+        });
+
+        server.addEventListener('close', () => {
+            this.connections.delete(userId);
+        });
+
+        return new Response(null, { status: 101, webSocket: client });
     }
 
     private executeRawQuery<
