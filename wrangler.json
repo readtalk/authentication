@@ -4,8 +4,8 @@
   "name": "auth",
   "upload_source_maps": true,
   "vars": {
-    "CALL_APP_ID": "fddc2d745a8682aea944b89179d4e8e1",
-    "CALL_TURN_KEY_ID": "f2f8c6d8f31d7b0a1adf2bf76cd5b45b"
+    "CALL_APP_ID": "acc632a15a0fc5e62a3175fb10dd4727",
+    "CALL_TURN_KEY_ID": "c40c01f7fa3ba5418f620d5890001799"
   },
   "kv_namespaces": [
     {
