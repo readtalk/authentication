@@ -47,6 +47,7 @@ export class CallHandler {
       return payload.properties?.id || payload.sub || "";
     } catch { return ""; }
   }
+  
   private async broadcast(userIds: string[], data: any) {
     try {
       const id = this.env.DATA_DO.idFromName("default");
@@ -59,8 +60,19 @@ export class CallHandler {
     } catch {}
   }
   
+  private async clearActiveCall(callId: string) {
+    try {
+      const id = this.env.DATA_DO.idFromName("default");
+      const stub = this.env.DATA_DO.get(id);
+      await stub.fetch(`https://do/calls/${callId}/cleanup`, {
+        method: "POST",
+      });
+    } catch {}
+  }
+
   private setupRoutes() {
     this.app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }));
+    
     this.app.post('/call/credentials', async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -100,6 +112,7 @@ export class CallHandler {
         return c.json({ success: false, error: "Failed to generate call credentials" }, 500);
       }
     });
+    
     this.app.post('/call/session', async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -140,6 +153,7 @@ export class CallHandler {
         return c.json({ success: false, error: "Failed to create session" }, 500);
       }
     });
+    
     this.app.post('/call/create', async (c) => {
       const callerId = this.getUserId(c);
       if (!callerId) return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -148,43 +162,72 @@ export class CallHandler {
       const callType = body.type || "audio";
       const chatId = body.chat_id || body.chatId || [callerId, targetId].sort().join("_");
       if (!targetId) return c.json({ success: false, error: "target required" }, 400);
+      
       await this.ensureLiveTable();
       const callId = crypto.randomUUID();
+      
       await this.env.DATA_DB.prepare(
         `INSERT INTO calls (id, caller_id, target_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'ringing')`
       ).bind(callId, callerId, targetId, chatId, callType).run();
-      await this.broadcast([targetId], { type: "CALL_INCOMING", callId, callerId, chatId, callType });
-      return c.json({ success: true, callId });
+      
+      const id = this.env.DATA_DO.idFromName("default");
+      const stub = this.env.DATA_DO.get(id);
+      await stub.fetch("https://do/calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": callerId },
+        body: JSON.stringify({ target_user_id: targetId, chat_id: chatId, type: callType, call_id: callId })
+      });
+      
+      return c.json({ success: true, callId, chatId });
     });
+    
     this.app.post('/call/:id/accept', async (c) => {
       const callId = c.req.param("id");
       await this.ensureLiveTable();
+      
       const row: any = await this.env.DATA_DB.prepare(`SELECT * FROM calls WHERE id = ?`).bind(callId).first();
       if (!row) return c.json({ success: false }, 404);
+      
       await this.env.DATA_DB.prepare(`UPDATE calls SET status = 'accepted' WHERE id = ?`).bind(callId).run();
+      
       await this.broadcast([row.caller_id, row.target_id], { type: "CALL_ACCEPTED", callId, callerId: row.caller_id, targetId: row.target_id });
+      await this.clearActiveCall(callId);
+      
       return c.json({ success: true });
     });
+    
     this.app.post('/call/:id/decline', async (c) => {
       const callId = c.req.param("id");
       await this.ensureLiveTable();
+      
       const row: any = await this.env.DATA_DB.prepare(`SELECT * FROM calls WHERE id = ?`).bind(callId).first();
       if (!row) return c.json({ success: false }, 404);
+      
       await this.env.DATA_DB.prepare(`UPDATE calls SET status = 'declined' WHERE id = ?`).bind(callId).run();
+      
       await this.broadcast([row.caller_id, row.target_id], { type: "CALL_DECLINED", callId, callerId: row.caller_id, targetId: row.target_id });
+      await this.clearActiveCall(callId);
+      
       await this.env.DATA_DB.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId).run();
       return c.json({ success: true });
     });
+    
     this.app.post('/call/:id/end', async (c) => {
       const callId = c.req.param("id");
       await this.ensureLiveTable();
+      
       const row: any = await this.env.DATA_DB.prepare(`SELECT * FROM calls WHERE id = ?`).bind(callId).first();
       if (!row) return c.json({ success: false }, 404);
+      
       await this.env.DATA_DB.prepare(`UPDATE calls SET status = 'ended' WHERE id = ?`).bind(callId).run();
+      
       await this.broadcast([row.caller_id, row.target_id], { type: "CALL_ENDED", callId, callerId: row.caller_id, targetId: row.target_id });
+      await this.clearActiveCall(callId);
+      
       await this.env.DATA_DB.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId).run();
       return c.json({ success: true });
     });
+    
     this.app.post('/call/log', async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -212,6 +255,7 @@ export class CallHandler {
         return c.json({ success: false, error: "Failed to save call log" }, 500);
       }
     });
+    
     this.app.get('/call/history', async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -236,5 +280,6 @@ export class CallHandler {
       }
     });
   }
+  
   public getApp(): Hono { return this.app; }
 }
