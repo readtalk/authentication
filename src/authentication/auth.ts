@@ -113,12 +113,11 @@ export class Authentication extends DurableObject {
       return c.json({ success: true, chat_id: chatId, existing: false });
     });
 
-    this.app.post("/calls", async (c) => {
+    this.app.post("/call/create", async (c) => {
       const userId = c.req.header("X-User-Id");
       if (!userId) return c.json({ success: false, error: "No user ID" }, 401);
       const { target_user_id, chat_id, type } = await c.req.json();
       if (!target_user_id) return c.json({ success: false, error: "Target user ID is required" }, 400);
-
       let finalChatId = chat_id;
       if (!finalChatId) {
         const existingChat = this.sql.exec(
@@ -134,9 +133,7 @@ export class Authentication extends DurableObject {
           this.sql.exec(`INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`, crypto.randomUUID(), finalChatId, target_user_id);
         }
       }
-
       this.sql.exec(`DELETE FROM active_call WHERE chat_id = ? AND status = 'ringing'`, finalChatId);
-
       const callId = crypto.randomUUID();
       const finalType = type || "audio";
       const createdAt = Math.floor(Date.now() / 1000);
@@ -145,7 +142,6 @@ export class Authentication extends DurableObject {
         `INSERT INTO active_call (id, caller_id, receiver_id, chat_id, type, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'ringing', ?, ?)`,
         callId, userId, target_user_id, finalChatId, finalType, createdAt, expiresAt
       );
-
       const targetSocket = this.connections.get(target_user_id);
       if (!targetSocket || targetSocket.readyState !== 1) {
         await this.env.DATA_DB.prepare(
@@ -157,7 +153,6 @@ export class Authentication extends DurableObject {
         this.sql.exec(`DELETE FROM active_call WHERE id = ?`, callId);
         return c.json({ success: true, callId, chatId: finalChatId, offline: true });
       }
-
       await this.notify(finalChatId, {
         type: "CALL_INCOMING",
         callId,
@@ -168,7 +163,7 @@ export class Authentication extends DurableObject {
       return c.json({ success: true, callId, chatId: finalChatId });
     });
 
-    this.app.get("/calls/info", async (c) => {
+    this.app.get("/call/info", async (c) => {
       const callId = c.req.query("callId");
       if (!callId) return c.json({ success: false, error: "callId required" }, 400);
       const call = this.sql.exec(`SELECT * FROM active_call WHERE id = ?`, callId).toArray();
