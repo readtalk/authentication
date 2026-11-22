@@ -1,4 +1,3 @@
-//
 import { issuer } from "@openauthjs/openauth";
 import {
 	CloudflareStorage,
@@ -12,7 +11,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { UpdateListHandler } from "./authentication/update";
 import { ArtificialIntelligenceHandler } from "./authentication/ai";
-import { CallHandler } from "./authentication/call";
 
 export { Authentication } from "./authentication/auth";
 export { Room } from "./authentication/room";
@@ -41,7 +39,6 @@ app.get('/users', async (c) => {
 app.get('/users/online', async (c) => {
 	const id = c.env.DATA_DO.idFromName('default');
 	const stub = c.env.DATA_DO.get(id);
-
 	const doUrl = new URL('https://do/users/online');
 	return stub.fetch(doUrl.toString());
 });
@@ -75,7 +72,7 @@ app.get('/users/mutual', async (c) => {
 
 app.get('/users/:username', async (c) => {
 	const username = c.req.param('username');
-	
+
 	let viewerId = '';
 	const authHeader = c.req.header('Authorization');
 	if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -86,7 +83,7 @@ app.get('/users/:username', async (c) => {
 			viewerId = payload.properties?.id || payload.sub || '';
 		} catch (e) {}
 	}
-	
+
 	const user = await c.env.DATA_DB.prepare(
 		`SELECT * FROM user WHERE username = ?`
 	).bind(username).first();
@@ -101,7 +98,7 @@ app.get('/users/:username', async (c) => {
 		const followA = await c.env.DATA_DB.prepare(
 			`SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?`
 		).bind(viewerId, user.id).first();
-		
+
 		const followB = await c.env.DATA_DB.prepare(
 			`SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?`
 		).bind(user.id, viewerId).first();
@@ -178,22 +175,22 @@ app.get('/users/:username', async (c) => {
 		link_preview: row.link_preview ? JSON.parse(row.link_preview) : null
 	}));
 
-	return c.json({ 
-		success: true, 
+	return c.json({
+		success: true,
 		user: {
 			...user,
 			follow_status: followStatus,
 			follower_count: followerCountResult?.count || 0,
 			following_count: followingCountResult?.count || 0,
 			updates: formattedUpdates
-		} 
+		}
 	});
 });
 
 app.post('/users/:username/follow', async (c) => {
 	const username = c.req.param('username');
 	const authHeader = c.req.header('Authorization');
-	
+
 	if (!authHeader || !authHeader.startsWith('Bearer ')) {
 		return c.json({ success: false, error: "Unauthorized" }, 401);
 	}
@@ -373,7 +370,7 @@ app.all('/chats/*', async (c) => {
 	}
 });
 
-app.all('/calls', async (c) => {
+app.post('/call/create', async (c) => {
 	const authHeader = c.req.header("Authorization");
 	if (!authHeader || !authHeader.startsWith("Bearer ")) {
 		return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -382,36 +379,140 @@ app.all('/calls', async (c) => {
 	const payload = JSON.parse(atob(token.split(".")[1]));
 	const userId = payload.properties?.id || payload.sub;
 
-	if (!userId) {
-		return c.json({ success: false, error: "Invalid token" }, 401);
-	}
+	const { target_user_id, chat_id, type } = await c.req.json();
+	if (!target_user_id) return c.json({ success: false, error: "Target user ID is required" }, 400);
 
 	const id = c.env.DATA_DO.idFromName('default');
 	const stub = c.env.DATA_DO.get(id);
 
-	const doUrl = new URL('https://do' + c.req.path);
-	doUrl.search = c.req.url.split('?')[1] || '';
-
 	const newHeaders = new Headers(c.req.raw.headers);
 	newHeaders.set("X-User-Id", userId);
 
+	const doUrl = new URL('https://do/calls');
+	
 	const newRequest = new Request(doUrl.toString(), {
-		method: c.req.method,
+		method: "POST",
 		headers: newHeaders,
-		body: c.req.raw.body
+		body: JSON.stringify({ target_user_id, chat_id, type })
 	});
 
 	return stub.fetch(newRequest);
 });
 
+app.post('/call/:id/accept', async (c) => {
+	const callId = c.req.param("id");
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+	const token = authHeader.replace("Bearer ", "");
+	const payload = JSON.parse(atob(token.split(".")[1]));
+	const userId = payload.properties?.id || payload.sub;
+
+	const dataDoId = c.env.DATA_DO.idFromName('default');
+	const dataStub = c.env.DATA_DO.get(dataDoId);
+	const callInfoRes = await dataStub.fetch(new Request('https://do/calls/info?callId=' + callId, {
+		headers: { "X-User-Id": userId }
+	}));
+	const callInfo: any = await callInfoRes.json();
+	
+	if (!callInfo.success || !callInfo.call) {
+		return c.json({ success: false, error: "Call not found" }, 404);
+	}
+
+	const chatId = callInfo.call.chatId;
+	const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
+	const roomStub = c.env.ROOM_DO.get(roomDoId);
+
+	const roomRes = await roomStub.fetch(new Request(`https://do/calls/${callId}/accept`, {
+		method: "POST",
+		headers: {
+			"X-User-Id": userId,
+			"Content-Type": "application/json"
+		},
+		body: JSON.stringify(callInfo.call)
+	}));
+
+	return new Response(roomRes.body, roomRes);
+});
+
+app.post('/call/:id/decline', async (c) => {
+	const callId = c.req.param("id");
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+	const token = authHeader.replace("Bearer ", "");
+	const payload = JSON.parse(atob(token.split(".")[1]));
+	const userId = payload.properties?.id || payload.sub;
+
+	const dataDoId = c.env.DATA_DO.idFromName('default');
+	const dataStub = c.env.DATA_DO.get(dataDoId);
+	const callInfoRes = await dataStub.fetch(new Request('https://do/calls/info?callId=' + callId, {
+		headers: { "X-User-Id": userId }
+	}));
+	const callInfo: any = await callInfoRes.json();
+	
+	if (!callInfo.success || !callInfo.call) {
+		return c.json({ success: false, error: "Call not found" }, 404);
+	}
+
+	const chatId = callInfo.call.chatId;
+	const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
+	const roomStub = c.env.ROOM_DO.get(roomDoId);
+
+	const roomRes = await roomStub.fetch(new Request(`https://do/calls/${callId}/decline`, {
+		method: "POST",
+		headers: {
+			"X-User-Id": userId,
+			"Content-Type": "application/json"
+		},
+		body: JSON.stringify(callInfo.call)
+	}));
+
+	return new Response(roomRes.body, roomRes);
+});
+
+app.post('/call/:id/end', async (c) => {
+	const callId = c.req.param("id");
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader || !authHeader.startsWith("Bearer ")) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+	const token = authHeader.replace("Bearer ", "");
+	const payload = JSON.parse(atob(token.split(".")[1]));
+	const userId = payload.properties?.id || payload.sub;
+
+	const dataDoId = c.env.DATA_DO.idFromName('default');
+	const dataStub = c.env.DATA_DO.get(dataDoId);
+	const callInfoRes = await dataStub.fetch(new Request('https://do/calls/info?callId=' + callId, {
+		headers: { "X-User-Id": userId }
+	}));
+	const callInfo: any = await callInfoRes.json();
+	
+	if (!callInfo.success || !callInfo.call) {
+		return c.json({ success: false, error: "Call not found" }, 404);
+	}
+
+	const chatId = callInfo.call.chatId;
+	const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
+	const roomStub = c.env.ROOM_DO.get(roomDoId);
+
+	const roomRes = await roomStub.fetch(new Request(`https://do/calls/${callId}/end`, {
+		method: "POST",
+		headers: {
+			"X-User-Id": userId,
+			"Content-Type": "application/json"
+		},
+		body: JSON.stringify(callInfo.call)
+	}));
+
+	return new Response(roomRes.body, roomRes);
+});
+
 app.all('/ai/*', async (c) => {
 	const aiHandler = new ArtificialIntelligenceHandler(c.env);
 	return aiHandler.getApp().fetch(c.req.raw);
-});
-
-app.all('/call/*', async (c) => {
-	const callHandler = new CallHandler(c.env);
-	return callHandler.getApp().fetch(c.req.raw);
 });
 
 app.get('/settings', async (c) => {
@@ -483,15 +584,15 @@ app.post('/settings', async (c) => {
 		await c.env.DATA_DB.prepare(
 			`UPDATE user SET username = ?, yourname = ?, date_of_birth = ?, avatar = ?, header = ?, headline = ?, about = ?, socials = ?, location = ?, username_updated_at = CASE WHEN ? = 1 THEN unixepoch() ELSE username_updated_at END WHERE id = ?`
 		).bind(
-			username, 
-			yourname, 
-			date_of_birth, 
-			avatar || null, 
-			header || null, 
-			headline || null, 
-			about || null, 
-			socials || null, 
-			location || null, 
+			username,
+			yourname,
+			date_of_birth,
+			avatar || null,
+			header || null,
+			headline || null,
+			about || null,
+			socials || null,
+			location || null,
 			isUsernameChanged ? 1 : 0,
 			userId
 		).run();
@@ -521,9 +622,9 @@ export default {
 		if (url.pathname.startsWith('/updates')) {
 			const authHeader = request.headers.get("Authorization");
 			if (!authHeader || !authHeader.startsWith("Bearer ")) {
-				return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), { 
-					status: 401, 
-					headers: { "Content-Type": "application/json" } 
+				return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+					status: 401,
+					headers: { "Content-Type": "application/json" }
 				});
 			}
 
@@ -534,9 +635,9 @@ export default {
 				const userId = payload.properties?.id || payload.sub;
 
 				if (!userId) {
-					return new Response(JSON.stringify({ success: false, error: "Invalid token" }), { 
-						status: 401, 
-						headers: { "Content-Type": "application/json" } 
+					return new Response(JSON.stringify({ success: false, error: "Invalid token" }), {
+						status: 401,
+						headers: { "Content-Type": "application/json" }
 					});
 				}
 
@@ -552,14 +653,14 @@ export default {
 				const updateList = new UpdateListHandler(env);
 				return updateList.getApp().fetch(newRequest);
 			} catch (error) {
-				return new Response(JSON.stringify({ success: false, error: "Invalid token" }), { 
-					status: 401, 
-					headers: { "Content-Type": "application/json" } 
+				return new Response(JSON.stringify({ success: false, error: "Invalid token" }), {
+					status: 401,
+					headers: { "Content-Type": "application/json" }
 				});
 			}
 		}
 
-		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai') || url.pathname.startsWith('/call') || url.pathname.startsWith('/calls')) {
+		if (url.pathname.startsWith('/users') || url.pathname === '/ws' || url.pathname === '/settings' || url.pathname.startsWith('/chats') || url.pathname.startsWith('/notifications') || url.pathname.startsWith('/ai') || url.pathname.startsWith('/call')) {
 			return app.fetch(request, env, ctx);
 		}
 
