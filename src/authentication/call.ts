@@ -39,7 +39,7 @@ export class CallHandler {
   private setupRoutes() {
     this.app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"], allowHeaders: ["Content-Type", "Authorization"] }));
 
-    // --- TURN / ICE, dari File 2 cURL ---
+    
     this.app.post("/call/credentials", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -52,7 +52,7 @@ export class CallHandler {
         if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
 
         const keyId = this.env.CALL_TURN_KEY_ID;
-        const apiToken = this.env.CALL_APP_SECRET;
+        const apiToken = this.env.CALL_APP_ID_TOKEN;
         if (!keyId || !apiToken) {
           return c.json({ success: false, error: "Call service not configured" }, 500);
         }
@@ -75,7 +75,7 @@ export class CallHandler {
       }
     });
 
-    // --- SESSION, dari File 1 Echo Demo, tapi SDP diterusin ---
+    
     this.app.post("/call/session", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -88,7 +88,7 @@ export class CallHandler {
         if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
 
         const appId = this.env.CALL_APP_ID;
-        const appSecret = this.env.CALL_APP_SECRET;
+        const appSecret = this.env.CALL_APP_ID_TOKEN;
         if (!appId || !appSecret) {
           return c.json({ success: false, error: "Call service not configured" }, 500);
         }
@@ -119,9 +119,7 @@ export class CallHandler {
       }
     });
 
-    // --- TRACKS: publish local + subscribe remote ---
-    // Echo Demo: newTracks(trackObjects, offerSDP)
-    // Call 2 orang: callee subscribe pake { location: 'remote', sessionId: callerSessionId, trackName }
+    
     this.app.post("/call/tracks", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -134,7 +132,7 @@ export class CallHandler {
         if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
 
         const appId = this.env.CALL_APP_ID;
-        const appSecret = this.env.CALL_APP_SECRET;
+        const appSecret = this.env.CALL_APP_ID_TOKEN;
         if (!appId || !appSecret) {
           return c.json({ success: false, error: "Call service not configured" }, 500);
         }
@@ -167,7 +165,7 @@ export class CallHandler {
       }
     });
 
-    // --- RENEGOTIATE: kirim answer SDP ---
+    
     this.app.post("/call/renegotiate", async (c) => {
       const authHeader = c.req.header("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -180,7 +178,7 @@ export class CallHandler {
         if (!userId) return c.json({ success: false, error: "Invalid token" }, 401);
 
         const appId = this.env.CALL_APP_ID;
-        const appSecret = this.env.CALL_APP_SECRET;
+        const appSecret = this.env.CALL_APP_ID_TOKEN;
         if (!appId || !appSecret) {
           return c.json({ success: false, error: "Call service not configured" }, 500);
         }
@@ -209,7 +207,7 @@ export class CallHandler {
       }
     });
 
-    // --- SIGNALING via DATA_DO, tetep sama, gak diubah ---
+    
     this.app.post("/call/create", async (c) => {
       const callerId = this.getUserId(c);
       if (!callerId) return c.json({ success: false, error: "Unauthorized" }, 401);
