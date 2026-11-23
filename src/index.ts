@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { UpdateListHandler } from "./authentication/update";
 import { ArtificialIntelligenceHandler } from "./authentication/ai";
+import { CallHandler } from "./authentication/call";
 
 export { Authentication } from "./authentication/auth";
 export { Room } from "./authentication/room";
@@ -370,7 +371,7 @@ app.all('/chats/*', async (c) => {
 	}
 });
 
-app.post('/call/create', async (c) => {
+app.all('/call/*', async (c) => {
 	const authHeader = c.req.header("Authorization");
 	if (!authHeader || !authHeader.startsWith("Bearer ")) {
 		return c.json({ success: false, error: "Unauthorized" }, 401);
@@ -379,135 +380,44 @@ app.post('/call/create', async (c) => {
 	const payload = JSON.parse(atob(token.split(".")[1]));
 	const userId = payload.properties?.id || payload.sub;
 
-	const { target_user_id, chat_id, type } = await c.req.json();
-	if (!target_user_id) return c.json({ success: false, error: "Target user ID is required" }, 400);
+	const pathParts = c.req.path.split('/');
+	const isRoomAction = pathParts.includes('accept') || pathParts.includes('decline') || pathParts.includes('end') || pathParts.includes('signal');
+	const callId = pathParts[3];
 
-	const id = c.env.DATA_DO.idFromName('default');
-	const stub = c.env.DATA_DO.get(id);
+	if (isRoomAction && callId) {
+		const dataDoId = c.env.DATA_DO.idFromName('default');
+		const dataStub = c.env.DATA_DO.get(dataDoId);
+		const callInfoRes = await dataStub.fetch(new Request('https://do/call/info?callId=' + callId, {
+			headers: { "X-User-Id": userId }
+		}));
+		const callInfo: any = await callInfoRes.json();
 
-	const newHeaders = new Headers(c.req.raw.headers);
-	newHeaders.set("X-User-Id", userId);
+		if (!callInfo.success || !callInfo.call) {
+			return c.json({ success: false, error: "Call not found" }, 404);
+		}
 
-	const doUrl = new URL('https://do/calls');
-	
-	const newRequest = new Request(doUrl.toString(), {
-		method: "POST",
-		headers: newHeaders,
-		body: JSON.stringify({ target_user_id, chat_id, type })
-	});
+		const chatId = callInfo.call.chat_id;
+		const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
+		const roomStub = c.env.ROOM_DO.get(roomDoId);
 
-	return stub.fetch(newRequest);
-});
+		const newHeaders = new Headers(c.req.raw.headers);
+		newHeaders.set("X-User-Id", userId);
+		newHeaders.set("X-Chat-Id", chatId);
 
-app.post('/call/:id/accept', async (c) => {
-	const callId = c.req.param("id");
-	const authHeader = c.req.header("Authorization");
-	if (!authHeader || !authHeader.startsWith("Bearer ")) {
-		return c.json({ success: false, error: "Unauthorized" }, 401);
-	}
-	const token = authHeader.replace("Bearer ", "");
-	const payload = JSON.parse(atob(token.split(".")[1]));
-	const userId = payload.properties?.id || payload.sub;
+		const doUrl = new URL('https://do' + c.req.path.replace(`/call/${callId}`, '/calls'));
+		doUrl.search = c.req.url.split('?')[1] || '';
 
-	const dataDoId = c.env.DATA_DO.idFromName('default');
-	const dataStub = c.env.DATA_DO.get(dataDoId);
-	const callInfoRes = await dataStub.fetch(new Request('https://do/calls/info?callId=' + callId, {
-		headers: { "X-User-Id": userId }
-	}));
-	const callInfo: any = await callInfoRes.json();
-	
-	if (!callInfo.success || !callInfo.call) {
-		return c.json({ success: false, error: "Call not found" }, 404);
+		const newRequest = new Request(doUrl.toString(), {
+			method: c.req.method,
+			headers: newHeaders,
+			body: c.req.raw.body
+		});
+
+		return roomStub.fetch(newRequest);
 	}
 
-	const chatId = callInfo.call.chatId;
-	const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
-	const roomStub = c.env.ROOM_DO.get(roomDoId);
-
-	const roomRes = await roomStub.fetch(new Request(`https://do/calls/${callId}/accept`, {
-		method: "POST",
-		headers: {
-			"X-User-Id": userId,
-			"Content-Type": "application/json"
-		},
-		body: JSON.stringify(callInfo.call)
-	}));
-
-	return new Response(roomRes.body, roomRes);
-});
-
-app.post('/call/:id/decline', async (c) => {
-	const callId = c.req.param("id");
-	const authHeader = c.req.header("Authorization");
-	if (!authHeader || !authHeader.startsWith("Bearer ")) {
-		return c.json({ success: false, error: "Unauthorized" }, 401);
-	}
-	const token = authHeader.replace("Bearer ", "");
-	const payload = JSON.parse(atob(token.split(".")[1]));
-	const userId = payload.properties?.id || payload.sub;
-
-	const dataDoId = c.env.DATA_DO.idFromName('default');
-	const dataStub = c.env.DATA_DO.get(dataDoId);
-	const callInfoRes = await dataStub.fetch(new Request('https://do/calls/info?callId=' + callId, {
-		headers: { "X-User-Id": userId }
-	}));
-	const callInfo: any = await callInfoRes.json();
-	
-	if (!callInfo.success || !callInfo.call) {
-		return c.json({ success: false, error: "Call not found" }, 404);
-	}
-
-	const chatId = callInfo.call.chatId;
-	const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
-	const roomStub = c.env.ROOM_DO.get(roomDoId);
-
-	const roomRes = await roomStub.fetch(new Request(`https://do/calls/${callId}/decline`, {
-		method: "POST",
-		headers: {
-			"X-User-Id": userId,
-			"Content-Type": "application/json"
-		},
-		body: JSON.stringify(callInfo.call)
-	}));
-
-	return new Response(roomRes.body, roomRes);
-});
-
-app.post('/call/:id/end', async (c) => {
-	const callId = c.req.param("id");
-	const authHeader = c.req.header("Authorization");
-	if (!authHeader || !authHeader.startsWith("Bearer ")) {
-		return c.json({ success: false, error: "Unauthorized" }, 401);
-	}
-	const token = authHeader.replace("Bearer ", "");
-	const payload = JSON.parse(atob(token.split(".")[1]));
-	const userId = payload.properties?.id || payload.sub;
-
-	const dataDoId = c.env.DATA_DO.idFromName('default');
-	const dataStub = c.env.DATA_DO.get(dataDoId);
-	const callInfoRes = await dataStub.fetch(new Request('https://do/calls/info?callId=' + callId, {
-		headers: { "X-User-Id": userId }
-	}));
-	const callInfo: any = await callInfoRes.json();
-	
-	if (!callInfo.success || !callInfo.call) {
-		return c.json({ success: false, error: "Call not found" }, 404);
-	}
-
-	const chatId = callInfo.call.chatId;
-	const roomDoId = c.env.ROOM_DO.idFromName(`room-${chatId}`);
-	const roomStub = c.env.ROOM_DO.get(roomDoId);
-
-	const roomRes = await roomStub.fetch(new Request(`https://do/calls/${callId}/end`, {
-		method: "POST",
-		headers: {
-			"X-User-Id": userId,
-			"Content-Type": "application/json"
-		},
-		body: JSON.stringify(callInfo.call)
-	}));
-
-	return new Response(roomRes.body, roomRes);
+	const callHandler = new CallHandler(c.env);
+	return callHandler.getApp().fetch(c.req.raw);
 });
 
 app.all('/ai/*', async (c) => {
