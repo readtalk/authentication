@@ -22,6 +22,13 @@ export class Authentication extends DurableObject {
       CREATE TABLE IF NOT EXISTS user_id (
         id TEXT PRIMARY KEY
       );
+      CREATE TABLE IF NOT EXISTS session (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at INTEGER DEFAULT (unixepoch()),
+        expires_at INTEGER,
+        FOREIGN KEY(user_id) REFERENCES user_id(id)
+      );
       CREATE TABLE IF NOT EXISTS chat (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -34,6 +41,7 @@ export class Authentication extends DurableObject {
         chat_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         created_at INTEGER DEFAULT (unixepoch()),
+        role TEXT DEFAULT 'member',
         UNIQUE(chat_id, user_id)
       );
       CREATE TABLE IF NOT EXISTS active_call (
@@ -86,6 +94,17 @@ export class Authentication extends DurableObject {
       if (!userId) return c.json({ success: false, error: 'No user ID' }, 401);
       const { name, description, is_private, member_ids } = await c.req.json();
       if (!name?.trim()) return c.json({ success: false, error: 'Chat name is required' }, 400);
+      
+      // --- BAGIAN PEMBUATAN SESSION ---
+      // Nyatet bahwa user ini lagi buka sesi (chat)
+      const sessionId = crypto.randomUUID();
+      const expiresAt = Math.floor(Date.now() / 1000) + (24 * 60 * 60); // 24 jam
+      this.sql.exec(
+        `INSERT INTO session (id, user_id, expires_at) VALUES (?, ?, ?)`,
+        sessionId, userId, expiresAt
+      );
+      // --------------------------------
+
       if (is_private && member_ids && member_ids.length === 1) {
         const targetUserId = member_ids[0];
         const existingChat = this.sql.exec(`
@@ -98,23 +117,35 @@ export class Authentication extends DurableObject {
           return c.json({ success: true, chat_id: existingChat[0].id, existing: true });
         }
       }
+      
       const chatId = crypto.randomUUID();
       this.sql.exec(
         `INSERT INTO chat (id, name, description, is_private) VALUES (?, ?, ?, ?)`,
         chatId, name, description || null, is_private ? 1 : 0
       );
+      
+      // Pembuat chat dapet role 'admin'
       this.sql.exec(
-        `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
+        `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'admin')`,
         crypto.randomUUID(), chatId, userId
       );
+      
       if (member_ids && Array.isArray(member_ids)) {
-        for (const mid of member_ids.filter((id: string) => id !== userId)) {
+        // Filter member yang bukan pembuat
+        const otherMembers = member_ids.filter((id: string) => id !== userId);
+        
+        for (let i = 0; i < otherMembers.length; i++) {
+          const mid = otherMembers[i];
+          // Jika private chat (1-on-1) atau member pertama, dapet 'moderator'. Sisanya 'member'.
+          const role = (is_private || i === 0) ? 'moderator' : 'member';
+          
           this.sql.exec(
-            `INSERT OR IGNORE INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
-            crypto.randomUUID(), chatId, mid
+            `INSERT OR IGNORE INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, ?)`,
+            crypto.randomUUID(), chatId, mid, role
           );
         }
       }
+      
       return c.json({ success: true, chat_id: chatId, existing: false });
     });
 
@@ -141,11 +172,11 @@ export class Authentication extends DurableObject {
             finalChatId, 'Private Chat', null, 1
           );
           this.sql.exec(
-            `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
+            `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'admin')`,
             crypto.randomUUID(), finalChatId, userId
           );
           this.sql.exec(
-            `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
+            `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'moderator')`,
             crypto.randomUUID(), finalChatId, target_user_id
           );
         }
