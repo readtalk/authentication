@@ -95,16 +95,6 @@ export class Authentication extends DurableObject {
       const { name, description, is_private, member_ids } = await c.req.json();
       if (!name?.trim()) return c.json({ success: false, error: 'Chat name is required' }, 400);
       
-      // --- BAGIAN PEMBUATAN SESSION ---
-      // Nyatet bahwa user ini lagi buka sesi (chat)
-      const sessionId = crypto.randomUUID();
-      const expiresAt = Math.floor(Date.now() / 1000) + (24 * 60 * 60); // 24 jam
-      this.sql.exec(
-        `INSERT INTO session (id, user_id, expires_at) VALUES (?, ?, ?)`,
-        sessionId, userId, expiresAt
-      );
-      // --------------------------------
-
       if (is_private && member_ids && member_ids.length === 1) {
         const targetUserId = member_ids[0];
         const existingChat = this.sql.exec(`
@@ -124,19 +114,15 @@ export class Authentication extends DurableObject {
         chatId, name, description || null, is_private ? 1 : 0
       );
       
-      // Pembuat chat dapet role 'admin'
       this.sql.exec(
         `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'admin')`,
         crypto.randomUUID(), chatId, userId
       );
       
       if (member_ids && Array.isArray(member_ids)) {
-        // Filter member yang bukan pembuat
         const otherMembers = member_ids.filter((id: string) => id !== userId);
-        
         for (let i = 0; i < otherMembers.length; i++) {
           const mid = otherMembers[i];
-          // Jika private chat (1-on-1) atau member pertama, dapet 'moderator'. Sisanya 'member'.
           const role = (is_private || i === 0) ? 'moderator' : 'member';
           
           this.sql.exec(
@@ -185,7 +171,6 @@ export class Authentication extends DurableObject {
       const callId = crypto.randomUUID();
       const finalType = type || 'audio';
       
-      // Set alarm 60 detik untuk missed call
       await this.ctx.storage.setAlarm(Date.now() + 60000);
 
       this.sql.exec(
