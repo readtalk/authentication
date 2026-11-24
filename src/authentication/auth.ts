@@ -9,6 +9,7 @@ export class Authentication extends DurableObject {
   public sql: SqlStorage;
   public connections = new Map<string, WebSocket>();
   private env: any;
+
   constructor(ctx: DurableObjectState, env: any) {
     super(ctx, env);
     this.env = env;
@@ -18,39 +19,32 @@ export class Authentication extends DurableObject {
 
   private async setup() {
     this.sql.exec(`
-    CREATE TABLE IF NOT EXISTS user_id (
-      id TEXT PRIMARY KEY
-    );
-    CREATE TABLE IF NOT EXISTS chat (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      is_private INTEGER DEFAULT 0,
-      created_at INTEGER DEFAULT (unixepoch())
-    );
-    CREATE TABLE IF NOT EXISTS chat_user (
-      id TEXT PRIMARY KEY,
-      chat_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      created_at INTEGER DEFAULT (unixepoch()),
-      role TEXT NOT NULL DEFAULT 'member',
-      UNIQUE(chat_id, user_id)
-    );
-    CREATE TABLE IF NOT EXISTS session (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      created_at INTEGER DEFAULT (unixepoch()),
-      expires_at INTEGER
-    );
-    CREATE TABLE IF NOT EXISTS active_call (
-      id TEXT PRIMARY KEY,
-      caller_id TEXT NOT NULL,
-      receiver_id TEXT NOT NULL,
-      chat_id TEXT NOT NULL,
-      type TEXT DEFAULT 'audio',
-      status TEXT DEFAULT 'ringing',
-      created_at INTEGER DEFAULT (unixepoch())
-    );
+      CREATE TABLE IF NOT EXISTS user_id (
+        id TEXT PRIMARY KEY
+      );
+      CREATE TABLE IF NOT EXISTS chat (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        is_private INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT (unixepoch())
+      );
+      CREATE TABLE IF NOT EXISTS chat_user (
+        id TEXT PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        created_at INTEGER DEFAULT (unixepoch()),
+        UNIQUE(chat_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS active_call (
+        id TEXT PRIMARY KEY,
+        caller_id TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        type TEXT DEFAULT 'audio',
+        status TEXT DEFAULT 'ringing',
+        created_at INTEGER DEFAULT (unixepoch())
+      );
     `);
     this.setupRoutes();
   }
@@ -72,14 +66,13 @@ export class Authentication extends DurableObject {
       const userId = c.req.header('X-User-Id');
       if (!userId) return c.json({ success: false, error: 'No user ID' }, 401);
       const chats = this.sql.exec(`
-      SELECT ch.*, COUNT(DISTINCT cu2.user_id) as member_count,
-      GROUP_CONCAT(cu2.user_id) as member_ids
-      FROM chat ch
-      INNER JOIN chat_user cu ON ch.id = cu.chat_id
-      LEFT JOIN chat_user cu2 ON ch.id = cu2.chat_id
-      WHERE cu.user_id = ?
-      GROUP BY ch.id
-      ORDER BY ch.created_at DESC
+        SELECT ch.*, COUNT(DISTINCT cu2.user_id) as member_count, GROUP_CONCAT(cu2.user_id) as member_ids
+        FROM chat ch
+        INNER JOIN chat_user cu ON ch.id = cu.chat_id
+        LEFT JOIN chat_user cu2 ON ch.id = cu2.chat_id
+        WHERE cu.user_id = ?
+        GROUP BY ch.id
+        ORDER BY ch.created_at DESC
       `, userId).toArray();
       const formatted = chats.map((ch: any) => ({
         ...ch,
@@ -96,10 +89,10 @@ export class Authentication extends DurableObject {
       if (is_private && member_ids && member_ids.length === 1) {
         const targetUserId = member_ids[0];
         const existingChat = this.sql.exec(`
-        SELECT ch.id FROM chat ch
-        INNER JOIN chat_user cu1 ON ch.id = cu1.chat_id
-        INNER JOIN chat_user cu2 ON ch.id = cu2.chat_id
-        WHERE ch.is_private = 1 AND cu1.user_id = ? AND cu2.user_id = ? LIMIT 1
+          SELECT ch.id FROM chat ch
+          INNER JOIN chat_user cu1 ON ch.id = cu1.chat_id
+          INNER JOIN chat_user cu2 ON ch.id = cu2.chat_id
+          WHERE ch.is_private = 1 AND cu1.user_id = ? AND cu2.user_id = ? LIMIT 1
         `, userId, targetUserId).toArray();
         if (existingChat.length > 0) {
           return c.json({ success: true, chat_id: existingChat[0].id, existing: true });
@@ -110,21 +103,14 @@ export class Authentication extends DurableObject {
         `INSERT INTO chat (id, name, description, is_private) VALUES (?, ?, ?, ?)`,
         chatId, name, description || null, is_private ? 1 : 0
       );
-      // Save chat creator into session, session id is chat id
       this.sql.exec(
-        `INSERT INTO session (id, user_id, created_at, expires_at) VALUES (?, ?, unixepoch(), NULL)`,
-        chatId, userId
-      );
-      // Creator from session is admin
-      this.sql.exec(
-        `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'admin')`,
+        `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
         crypto.randomUUID(), chatId, userId
       );
-      // Other members are moderator
       if (member_ids && Array.isArray(member_ids)) {
         for (const mid of member_ids.filter((id: string) => id !== userId)) {
           this.sql.exec(
-            `INSERT OR IGNORE INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'moderator')`,
+            `INSERT OR IGNORE INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
             crypto.randomUUID(), chatId, mid
           );
         }
@@ -137,13 +123,14 @@ export class Authentication extends DurableObject {
       if (!userId) return c.json({ success: false, error: 'No user ID' }, 401);
       const { target_user_id, chat_id, type } = await c.req.json();
       if (!target_user_id) return c.json({ success: false, error: 'Target user ID is required' }, 400);
+
       let finalChatId = chat_id;
       if (!finalChatId) {
         const existingChat = this.sql.exec(`
-        SELECT ch.id FROM chat ch
-        INNER JOIN chat_user cu1 ON ch.id = cu1.chat_id
-        INNER JOIN chat_user cu2 ON ch.id = cu2.chat_id
-        WHERE ch.is_private = 1 AND cu1.user_id = ? AND cu2.user_id = ? LIMIT 1
+          SELECT ch.id FROM chat ch
+          INNER JOIN chat_user cu1 ON ch.id = cu1.chat_id
+          INNER JOIN chat_user cu2 ON ch.id = cu2.chat_id
+          WHERE ch.is_private = 1 AND cu1.user_id = ? AND cu2.user_id = ? LIMIT 1
         `, userId, target_user_id).toArray();
         if (existingChat.length > 0) {
           finalChatId = existingChat[0].id;
@@ -153,31 +140,28 @@ export class Authentication extends DurableObject {
             `INSERT INTO chat (id, name, description, is_private) VALUES (?, ?, ?, ?)`,
             finalChatId, 'Private Chat', null, 1
           );
-          // Save chat creator into session, session id is chat id
           this.sql.exec(
-            `INSERT INTO session (id, user_id, created_at, expires_at) VALUES (?, ?, unixepoch(), NULL)`,
-            finalChatId, userId
-          );
-          // Creator from session is admin
-          this.sql.exec(
-            `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'admin')`,
+            `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
             crypto.randomUUID(), finalChatId, userId
           );
-          // Other member is moderator
           this.sql.exec(
-            `INSERT INTO chat_user (id, chat_id, user_id, role) VALUES (?, ?, ?, 'moderator')`,
+            `INSERT INTO chat_user (id, chat_id, user_id) VALUES (?, ?, ?)`,
             crypto.randomUUID(), finalChatId, target_user_id
           );
         }
       }
+
       const callId = crypto.randomUUID();
       const finalType = type || 'audio';
-      // Set alarm for 60 seconds for missed call
+      
+      // Set alarm 60 detik untuk missed call
       await this.ctx.storage.setAlarm(Date.now() + 60000);
+
       this.sql.exec(
         `INSERT INTO active_call (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'ringing')`,
         callId, userId, target_user_id, finalChatId, finalType
       );
+
       const targetSocket = this.connections.get(target_user_id);
       if (!targetSocket || targetSocket.readyState !== 1) {
         await this.env.DATA_DB.prepare(
@@ -189,6 +173,7 @@ export class Authentication extends DurableObject {
         this.sql.exec(`DELETE FROM active_call WHERE id = ?`, callId);
         return c.json({ success: true, callId, chatId: finalChatId, offline: true });
       }
+
       await this.notify(finalChatId, {
         type: 'CALL_INCOMING',
         callId,
@@ -196,6 +181,7 @@ export class Authentication extends DurableObject {
         callerId: userId,
         callType: finalType,
       });
+
       return c.json({ success: true, callId, chatId: finalChatId });
     });
 
@@ -246,6 +232,7 @@ export class Authentication extends DurableObject {
     this.connections.set(userId, server);
     await this.broadcastUserPresence(userId, true);
     server.accept();
+
     server.addEventListener('message', async (event) => {
       try {
         const data = JSON.parse(event.data as string);
@@ -278,6 +265,7 @@ export class Authentication extends DurableObject {
         }
       } catch {}
     });
+
     server.addEventListener('close', async () => {
       this.connections.delete(userId);
       await this.broadcastUserPresence(userId, false);
@@ -304,9 +292,11 @@ export class Authentication extends DurableObject {
       await this.env.DATA_DB.prepare(
         `INSERT INTO call_history (id, caller_id, receiver_id, chat_id, type, status) VALUES (?, ?, ?, ?, ?, 'missed') ON CONFLICT(id) DO UPDATE SET status = 'missed'`
       ).bind(call.id, call.caller_id, call.receiver_id, call.chat_id, call.type).run();
+      
       await this.env.DATA_DB.prepare(
         `INSERT INTO notifications (id, user_id, actor_id, type) VALUES (?, ?, ?, 'missed_call')`
       ).bind(crypto.randomUUID(), call.receiver_id, call.caller_id).run();
+
       await this.notify(call.chat_id, { type: 'CALL_MISSED', callId: call.id });
       this.sql.exec(`DELETE FROM active_call WHERE id = ?`, call.id);
     }
