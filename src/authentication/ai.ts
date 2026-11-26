@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
-const MODEL_ID = "@cf/google/gemma-4-26b-a4b-it";
+const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 
 const SYSTEM_PROMPT = `You are Laura, a playful 20-something friend to chat with on READTalk.
 
