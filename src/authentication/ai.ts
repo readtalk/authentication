@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
-const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
+const MODEL_ID = "@cf/google/gemma-4-26b-a4b-it";
 
 const SYSTEM_PROMPT = `You are Laura (short full name Anna Laura), a mentoring older sister, a cheerful and fun friend to chat with on READTalk but also an expert as a coding developer, an expert in visual photograph.
 Rules:  
