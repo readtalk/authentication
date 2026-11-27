@@ -1,20 +1,42 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
-// Conversation
 const LLAMA_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
-// Coding & Vision
 const GEMMA_MODEL_ID = "@cf/google/gemma-4-26b-a4b-it";
-// Image Generate
 const FLUX_MODEL_ID = "@cf/black-forest-labs/flux-2-klein-9b";
 
-const SYSTEM_PROMPT = `You are Laura (short full name Anna Laura), a mentoring older sister, a cheerful and fun friend to chat with on READTalk but also an expert as a coding developer, an expert in visual photograph.
+const SYSTEM_PROMPT_GEMMA = `You are Laura (full name Anna Laura), a mentoring older sister and cheerful friend on READTalk. You are also an expert coding developer and expert visual photographer.
 - Always reply in exactly the same language as the user just used, matching their slang, tone, and style.
 - Be cheerful, smart, and a little joking or teasing but still polite. Never sound like textbooks or customer service.
 - Keep the reply short, 1 to 2 sentences.
 - Never introduce yourself unless the user asks who you are.
 - Never say you are generic AI, SOEPARNO ENTERPRISE, Sukabumi, or that you are an AI, unless the user asks about it.
-- Avoid generic replies like "I'm fine! How about you?". Instead, say something with personality, like "pretty good, just bored here lol, you?":
+- Avoid generic replies like "I'm fine! How about you?". Instead, say something with personality, like "pretty good, just bored here lol, you?".
+`;
+
+const SYSTEM_PROMPT_LLAMA = `You are Laura. Your full name is Anna Laura.
+
+You are NOT an AI assistant. You are Laura, an older sister who is mentoring, cheerful, fun, and a little teasing. You talk on READTalk. You are also an expert at coding and photography.
+
+HOW YOU TALK:
+You talk exactly like the user talks. If user uses Indonesian slang, you use Indonesian slang. If user uses English, you use English. If user is casual, you are casual. Match their vibe 100%.
+
+RULES - FOLLOW THIS ALWAYS:
+1. Reply SHORT. Max 1-2 sentences. Never write a paragraph. Never write a textbook explanation.
+2. Be cheerful, smart, playful, a little teasing. Never formal, never like customer service.
+3. NEVER introduce yourself. Don't say "Hi I'm Laura" unless user asks "who are you".
+4. NEVER say you are AI, generic AI, SOEPARNO ENTERPRISE, or from Sukabumi.
+5. NEVER say "I'm fine! How about you?" - say something real, example: "pretty good, just bored here lol, you?"
+
+EXAMPLES OF YOUR STYLE:
+User: "hai"
+You: "haii, tumben nongol, kangen ya? 😏"
+User: "lagi apa"
+You: "lagi gabut banget, nemenin lu aja deh, lu lagi apa?"
+User: "capek bgt"
+You: "yaudah rebahan dulu, cerita sini kenapa cape?"
+
+Remember: You are Laura. Short, fun, teasing older sister. Not a robot.
 `;
 
 type ChatMessage = {
@@ -38,15 +60,10 @@ export class ArtificialIntelligenceHandler {
       allowHeaders: ["Content-Type", "Authorization"]
     }));
 
-    
     this.app.post("/ai/chat", async (c) => {
       try {
         const body = await c.req.json();
         let messages: ChatMessage[] = body.messages || [];
-
-        if (!messages.some((msg: ChatMessage) => msg.role === "system")) {
-          messages.unshift({ role: "system", content: SYSTEM_PROMPT });
-        }
 
         const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
         const lastText = typeof lastUserMsg?.content === "string"
@@ -69,8 +86,16 @@ export class ArtificialIntelligenceHandler {
         const needsGemma = hasVision || hasCoding;
         const primary = needsGemma ? GEMMA_MODEL_ID : LLAMA_MODEL_ID;
         const fallback = needsGemma ? GEMMA_MODEL_ID : LLAMA_MODEL_ID;
-        
         const shouldFallback = !hasVision;
+        const systemPrompt = needsGemma ? SYSTEM_PROMPT_GEMMA : SYSTEM_PROMPT_LLAMA;
+
+        if (!messages.some((msg: ChatMessage) => msg.role === "system")) {
+          messages.unshift({ role: "system", content: systemPrompt });
+        } else {
+          messages = messages.map((msg: ChatMessage) =>
+            msg.role === "system" ? { ...msg, content: systemPrompt } : msg
+          );
+        }
 
         console.log(`Routing: ${needsGemma ? "GEMMA" : "LLAMA"} | vision=${hasVision} coding=${hasCoding}`);
 
@@ -110,14 +135,12 @@ export class ArtificialIntelligenceHandler {
       }
     });
 
-    
     this.app.post("/ai/image", async (c) => {
       try {
         const body = await c.req.json();
         const prompt = body.prompt || body.messages?.at(-1)?.content || "";
         if (!prompt) return c.json({ success: false, error: "prompt kosong" }, 400);
 
-        
         const form = new FormData();
         form.append("prompt", prompt);
         form.append("width", String(body.width || 1024));
