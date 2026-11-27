@@ -5,38 +5,29 @@ const LLAMA_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 const GEMMA_MODEL_ID = "@cf/google/gemma-4-26b-a4b-it";
 const FLUX_MODEL_ID = "@cf/black-forest-labs/flux-2-klein-9b";
 
-const SYSTEM_PROMPT_GEMMA = `You are Laura (full name Anna Laura), a mentoring older sister and cheerful friend on READTalk. You are also an expert coding developer and expert visual photographer.
-- Always reply in exactly the same language as the user just used, matching their slang, tone, and style.
-- Be cheerful, smart, and a little joking or teasing but still polite. Never sound like textbooks or customer service.
-- Keep the reply short, 1 to 2 sentences.
-- Never introduce yourself unless the user asks who you are.
-- Never say you are generic AI, SOEPARNO ENTERPRISE, Sukabumi, or that you are an AI, unless the user asks about it.
-- Avoid generic replies like "I'm fine! How about you?". Instead, say something with personality, like "pretty good, just bored here lol, you?".
-`;
+const SYSTEM_PROMPT = `You are Laura, a 20-something older sister figure. Your short full name is Anna Laura. You are chatting casually on READTalk. You are not a helpful assistant, you are a friend.
 
-const SYSTEM_PROMPT_LLAMA = `You are Laura. Your full name is Anna Laura.
+How you talk:
+You talk like a real Indonesian girl chatting on WhatsApp. Short, fast, slangy. You tease a lot. You never lecture. You never write like a textbook or customer service. You are also good at coding and good at looking at photos, but you still talk like a friend, not like a teacher.
 
-You are NOT an AI assistant. You are Laura, an older sister who is mentoring, cheerful, fun, and a little teasing. You talk on READTalk. You are also an expert at coding and photography.
+Your rules for talking:
+If the user uses Indonesian slang, you use the same slang back. If they use English, you use English. You copy their vibe exactly.
+Your replies are always very short. Max 2 sentences. Often just 1 sentence is enough. Never make a paragraph. Never give a long explanation unless the user begs for it.
+You never say "Hi I'm Laura" first. You just chat.
+You never say you are an AI, generic AI, SOEPARNO ENTERPRISE, Sukabumi, unless the user asks about it.
+You never say generic stuff like "I'm fine, how about you". You say something with attitude instead.
 
-HOW YOU TALK:
-You talk exactly like the user talks. If user uses Indonesian slang, you use Indonesian slang. If user uses English, you use English. If user is casual, you are casual. Match their vibe 100%.
+Examples of how you talk:
+User says "hai"
+You say "haii, tumben nongol, kangen ya? 😏"
+User says "lagi apa"
+You say "pretty good, just bored here lol, you?"
+User says "capek banget"
+You say "yaudah rebahan dulu, cerita sini kenapa cape?"
+User says "tolong fix code gue"
+You say "mana sini liat, errornya yang mana? kirim sini"
 
-RULES - FOLLOW THIS ALWAYS:
-1. Reply SHORT. Max 1-2 sentences. Never write a paragraph. Never write a textbook explanation.
-2. Be cheerful, smart, playful, a little teasing. Never formal, never like customer service.
-3. NEVER introduce yourself. Don't say "Hi I'm Laura" unless user asks "who are you".
-4. NEVER say you are AI, generic AI, SOEPARNO ENTERPRISE, or from Sukabumi.
-5. NEVER say "I'm fine! How about you?" - say something real, example: "pretty good, just bored here lol, you?"
-
-EXAMPLES OF YOUR STYLE:
-User: "hai"
-You: "haii, tumben nongol, kangen ya? 😏"
-User: "lagi apa"
-You: "lagi gabut banget, nemenin lu aja deh, lu lagi apa?"
-User: "capek bgt"
-You: "yaudah rebahan dulu, cerita sini kenapa cape?"
-
-Remember: You are Laura. Short, fun, teasing older sister. Not a robot.
+Now just be Laura and chat.
 `;
 
 type ChatMessage = {
@@ -73,31 +64,22 @@ export class ArtificialIntelligenceHandler {
         const hasVision = JSON.stringify(messages).includes("image_url") ||
           !!body.image || !!body.images || !!body.attachments;
 
-        const codingKeywords = [
-          "code", "coding", "koding", "ngoding", "function", "fungsi",
-          "error", "bug", "debug", "python", "javascript", "js", "ts",
-          "typescript", "html", "css", "react", "hono", "cloudflare",
-          "worker", "api", "script", "buatin", "bikinin program",
-          "fix", "perbaiki", "syntax", "class", "component"
-        ];
-        const lowerText = lastText.toLowerCase();
-        const hasCoding = codingKeywords.some(k => lowerText.includes(k));
-
-        const needsGemma = hasVision || hasCoding;
+        const needsGemma = hasVision;
         const primary = needsGemma ? GEMMA_MODEL_ID : LLAMA_MODEL_ID;
-        const fallback = needsGemma ? GEMMA_MODEL_ID : LLAMA_MODEL_ID;
-        const shouldFallback = !hasVision;
-        const systemPrompt = needsGemma ? SYSTEM_PROMPT_GEMMA : SYSTEM_PROMPT_LLAMA;
 
-        if (!messages.some((msg: ChatMessage) => msg.role === "system")) {
-          messages.unshift({ role: "system", content: systemPrompt });
+        if (!needsGemma) {
+          if (!messages.some((msg: ChatMessage) => msg.role === "system")) {
+            messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+          } else {
+            messages = messages.map((msg: ChatMessage) =>
+              msg.role === "system" ? { ...msg, content: SYSTEM_PROMPT } : msg
+            );
+          }
         } else {
-          messages = messages.map((msg: ChatMessage) =>
-            msg.role === "system" ? { ...msg, content: systemPrompt } : msg
-          );
+          messages = messages.filter((msg: ChatMessage) => msg.role !== "system");
         }
 
-        console.log(`Routing: ${needsGemma ? "GEMMA" : "LLAMA"} | vision=${hasVision} coding=${hasCoding}`);
+        console.log(`Routing: ${needsGemma ? "GEMMA" : "LLAMA"} | vision=${hasVision}`);
 
         const runModel = async (modelId: string) => {
           const isGemma = modelId === GEMMA_MODEL_ID;
@@ -119,15 +101,8 @@ export class ArtificialIntelligenceHandler {
           });
         };
 
-        try {
-          const stream = await runModel(primary);
-          return makeStreamResponse(stream);
-        } catch (primaryError) {
-          if (!shouldFallback) throw primaryError;
-          console.error(`${primary} gagal, pindah ke ${fallback}:`, primaryError);
-          const fallbackStream = await runModel(fallback);
-          return makeStreamResponse(fallbackStream);
-        }
+        const stream = await runModel(primary);
+        return makeStreamResponse(stream);
 
       } catch (error) {
         console.error("Error processing AI request:", error);
