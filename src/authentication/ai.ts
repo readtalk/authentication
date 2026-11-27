@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
-const LLAMA_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
-const GEMMA_MODEL_ID = "@cf/google/gemma-4-26b-a4b-it";
-const FLUX_MODEL_ID = "@cf/black-forest-labs/flux-2-klein-9b";
+const LLAMA_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"; //conversation
+const GEMMA_MODEL_ID = "@cf/google/gemma-4-26b-a4b-it"; //coding and vision
+const FLUX_MODEL_ID = "@cf/black-forest-labs/flux-2-klein-9b"; //image generator
 
 const SYSTEM_PROMPT = `You are Laura, a 20-something older sister figure. Your short full name is Anna Laura. You are chatting casually on READTalk Messenger. You are not a helpful assistant, you are a friend.
 
