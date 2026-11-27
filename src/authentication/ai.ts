@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
-const PRIMARY_MODEL_ID = "@cf/google/gemma-4-26b-4bit-it";
-
-const FALLBACK_MODEL_ID = "@cf/meta/llama-4-scout-17b-16e-instruct";
+// Conversation
+const LLAMA_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
+// Coding & Vision
+const GEMMA_MODEL_ID = "@cf/google/gemma-4-26b-a4b-it";
 
 const SYSTEM_PROMPT = `You are Laura (short full name Anna Laura), a mentoring older sister, a cheerful and fun friend to chat with on READTalk but also an expert as a coding developer, an expert in visual photograph.
 - Always reply in exactly the same language as the user just used, matching their slang, tone, and style.
@@ -16,7 +17,7 @@ const SYSTEM_PROMPT = `You are Laura (short full name Anna Laura), a mentoring o
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: any;
 };
 
 export class ArtificialIntelligenceHandler {
@@ -44,15 +45,45 @@ export class ArtificialIntelligenceHandler {
           messages.unshift({ role: "system", content: SYSTEM_PROMPT });
         }
 
-        const inputs = {
-          messages,
-          max_tokens: 1024,
-          stream: true,
+        
+        const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+        const lastText = typeof lastUserMsg?.content === "string"
+          ? lastUserMsg.content
+          : JSON.stringify(lastUserMsg?.content || "");
+
+        
+        const hasVision = JSON.stringify(messages).includes("image_url") ||
+          JSON.stringify(messages).includes("image") ||
+          !!body.image || !!body.images || !!body.attachments;
+
+        
+        const codingKeywords = [
+          "code", "coding", "koding", "ngoding", "function", "fungsi",
+          "error", "bug", "debug", "python", "javascript", "js", "ts",
+          "typescript", "html", "css", "react", "hono", "cloudflare",
+          "worker", "api", "script", "buatin", "bikinin program",
+          "fix", "perbaiki", "syntax", "class", "component"
+        ];
+        const lowerText = lastText.toLowerCase();
+        const hasCoding = codingKeywords.some(k => lowerText.includes(k));
+
+        
+        const needsGemma = hasVision || hasCoding;
+        const primary = needsGemma ? GEMMA_MODEL_ID : LLAMA_MODEL_ID;
+        const fallback = needsGemma ? LLAMA_MODEL_ID : GEMMA_MODEL_ID;
+
+        console.log(`Routing: ${needsGemma ? "GEMMA" : "LLAMA"} | vision=${hasVision} coding=${hasCoding}`);
+
+        const runModel = async (modelId: string) => {
+          return await this.env.AI.run(modelId, {
+            messages,
+            max_tokens: 1024,
+            stream: true,
+            chat_template_kwargs: { enable_thinking: false },
+          } as any);
         };
 
-        // Mode First
-        try {
-          const stream = await this.env.AI.run(PRIMARY_MODEL_ID, inputs);
+        const makeStreamResponse = (stream: any) => {
           return new Response(stream, {
             headers: {
               "content-type": "text/event-stream; charset=utf-8",
@@ -60,17 +91,16 @@ export class ArtificialIntelligenceHandler {
               "connection": "keep-alive",
             },
           });
+        };
+
+        try {
+          const stream = await runModel(primary);
+          return makeStreamResponse(stream);
         } catch (primaryError) {
-          console.error("Primary AI gagal, pindah ke backup:", primaryError);
-          // Mode Second
-          const fallbackStream = await this.env.AI.run(FALLBACK_MODEL_ID, inputs);
-          return new Response(fallbackStream, {
-            headers: {
-              "content-type": "text/event-stream; charset=utf-8",
-              "cache-control": "no-cache",
-              "connection": "keep-alive",
-            },
-          });
+          // Kalau yang utama gagal, baru lempar ke satunya
+          console.error(`${primary} gagal, pindah ke ${fallback}:`, primaryError);
+          const fallbackStream = await runModel(fallback);
+          return makeStreamResponse(fallbackStream);
         }
 
       } catch (error) {
